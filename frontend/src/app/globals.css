@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Warm cream canvas, white cards, emerald accents — matches the JSSF mockup. */
+    --background: 48 24% 95%;         /* #F5F4EF warm cream */
+    --foreground: 156 22% 12%;        /* #17251E near-black green */
+    --card: 0 0% 100%;
+    --card-foreground: 156 22% 12%;
+    --muted: 45 20% 92%;
+    --muted-foreground: 150 8% 45%;
+    --primary: 157 74% 29%;           /* #12805A emerald */
+    --primary-foreground: 0 0% 100%;
+    --border: 40 18% 88%;
+    --input: 40 18% 88%;
+    --ring: 157 74% 29%;
+    --radius: 0.9rem;
+
+    --sidebar: 158 62% 14%;           /* #0F3D2E deep pine green */
+    --sidebar-foreground: 150 18% 72%;
+    --sidebar-accent: 157 74% 29%;
+    --sidebar-active: 156 46% 22%;    /* lighter emerald pill for active item */
+
+    --success: 157 74% 32%;
+    --warning: 38 82% 49%;            /* #E8A317 amber */
+    --danger: 2 71% 53%;              /* #DC3B34 red */
+    --info: 217 91% 60%;              /* #3B82F6 blue — re-loan */
+
+    /* Sora — single modern fintech family used for both UI text and display headings. */
+    --font-sans: var(--font-sora), ui-sans-serif, system-ui, sans-serif;
+    --font-serif: var(--font-sora), ui-sans-serif, system-ui, sans-serif;
+  }
+
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans);
+    font-feature-settings: 'ss01' 1, 'cv01' 1;
+    letter-spacing: -0.011em;
+  }
+
+  /* Hide scrollbars app-wide while keeping scroll behaviour (no chunky legacy bars). */
+  * {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE/Edge legacy */
+  }
+  *::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none; /* Chrome/Safari/Edge */
+  }
+}
