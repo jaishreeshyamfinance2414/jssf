@@ -66,7 +66,12 @@ export const authService = {
     // Success — reset counters, issue tokens.
     await authRepository.resetLoginState(user.id);
     const perms = await authRepository.permissionsFor(user.id);
-    const accessToken = signAccessToken({ sub: user.id, role: user.role_name, perms });
+    const accessToken = signAccessToken({
+      sub: user.id,
+      role: user.role_name,
+      perms,
+      ...(user.must_change_password ? { pwc: true } : {}),
+    });
 
     const { raw, hash } = createRefreshToken();
     const ttl = input.rememberMe ? env.JWT_REFRESH_TTL_REMEMBER : env.JWT_REFRESH_TTL;
@@ -114,7 +119,12 @@ export const authService = {
     // Rotate: revoke the presented token, mint a fresh access + refresh pair.
     await authRepository.revokeRefreshToken(hash);
     const perms = await authRepository.permissionsFor(user.id);
-    const accessToken = signAccessToken({ sub: user.id, role: user.role_name, perms });
+    const accessToken = signAccessToken({
+      sub: user.id,
+      role: user.role_name,
+      perms,
+      ...(user.must_change_password ? { pwc: true } : {}),
+    });
 
     const { raw, hash: newHash } = createRefreshToken();
     const refreshExpiresAt = new Date(Date.now() + ms(env.JWT_REFRESH_TTL));
@@ -126,5 +136,72 @@ export const authService = {
   async logout(rawRefreshToken: string, actorId?: string) {
     if (rawRefreshToken) await authRepository.revokeRefreshToken(hashRefreshToken(rawRefreshToken));
     if (actorId) await audit({ actorId, action: 'LOGOUT', entity: 'user', entityId: actorId });
+  },
+
+  /**
+   * Self-service password change (also clears must_change_password). Requires
+   * the current password, and revokes every other session afterwards.
+   */
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+    ip?: string | null,
+  ) {
+    const user = await authRepository.findByIdWithRole(userId);
+    if (!user || !user.is_active) throw Unauthorized('User unavailable');
+
+    const valid = await argon2.verify(user.password_hash, currentPassword);
+    if (!valid) throw Unauthorized('Current password is incorrect');
+    if (currentPassword === newPassword) {
+      throw Unauthorized('New password must be different from the current one');
+    }
+
+    await authRepository.changePassword(userId, await argon2.hash(newPassword));
+    // Invalidate every existing session — anyone holding the old credentials
+    // (including whoever set the temporary password) is logged out.
+    await authRepository.revokeAllForUser(userId);
+
+    await audit({
+      actorId: userId,
+      action: 'PASSWORD_CHANGED',
+      entity: 'user',
+      entityId: userId,
+      ip,
+    });
+    return { changed: true };
+  },
+
+  /**
+   * Mint a fresh access + refresh pair for an already-verified user — used
+   * right after a password change so the current session continues.
+   */
+  async issueSession(userId: string, ip?: string | null, userAgent?: string | null): Promise<AuthResult> {
+    const user = await authRepository.findByIdWithRole(userId);
+    if (!user || !user.is_active) throw Unauthorized('User unavailable');
+
+    const perms = await authRepository.permissionsFor(user.id);
+    const accessToken = signAccessToken({
+      sub: user.id,
+      role: user.role_name,
+      perms,
+      ...(user.must_change_password ? { pwc: true } : {}),
+    });
+    const { raw, hash } = createRefreshToken();
+    const refreshExpiresAt = new Date(Date.now() + ms(env.JWT_REFRESH_TTL));
+    await authRepository.storeRefreshToken(user.id, hash, refreshExpiresAt, userAgent ?? null, ip ?? null);
+
+    return {
+      accessToken,
+      refreshToken: raw,
+      refreshExpiresAt,
+      user: {
+        id: user.id,
+        fullName: user.full_name,
+        role: user.role_name,
+        email: user.email,
+        mobile: user.mobile,
+      },
+    };
   },
 };

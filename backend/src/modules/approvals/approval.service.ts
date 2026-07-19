@@ -66,16 +66,26 @@ export const approvalService = {
   },
 
   async approve(id: string, reviewerId: string, note: string | null, ip?: string | null) {
-    const request = await approvalRepository.findById(id);
-    if (!request) throw NotFound('Approval request not found');
-    if (request.status !== 'pending') throw BadRequest('This request has already been reviewed');
+    const exists = await approvalRepository.findById(id);
+    if (!exists) throw NotFound('Approval request not found');
 
-    // If this throws (e.g. balance now insufficient), the request stays
-    // pending — nothing is marked approved until the underlying action
-    // actually succeeds.
-    const result = await applyRequest(request, reviewerId, ip);
+    // Atomically claim the request (pending → approved). Only one concurrent
+    // reviewer wins the claim, so the underlying action can never run twice.
+    const request = await approvalRepository.claim(id, 'approved', reviewerId, note);
+    if (!request) throw BadRequest('This request has already been reviewed');
 
-    await approvalRepository.markApproved(id, reviewerId, note);
+    let result;
+    try {
+      // applyRequest recomputes live state inside its own transaction. If it
+      // throws (e.g. balance now insufficient), release the claim so the
+      // request goes back to pending — nothing stays approved unless the
+      // underlying action actually succeeded.
+      result = await applyRequest(request, reviewerId, ip);
+    } catch (err) {
+      await approvalRepository.revertToPending(id);
+      throw err;
+    }
+
     await audit({
       actorId: reviewerId,
       action: 'REQUEST_APPROVED',
@@ -88,11 +98,14 @@ export const approvalService = {
   },
 
   async reject(id: string, reviewerId: string, reason: string, ip?: string | null) {
-    const request = await approvalRepository.findById(id);
-    if (!request) throw NotFound('Approval request not found');
-    if (request.status !== 'pending') throw BadRequest('This request has already been reviewed');
+    const exists = await approvalRepository.findById(id);
+    if (!exists) throw NotFound('Approval request not found');
 
-    await approvalRepository.markRejected(id, reviewerId, reason);
+    // Same atomic claim as approve — a request can't be rejected after (or
+    // while) another reviewer approves it.
+    const request = await approvalRepository.claim(id, 'rejected', reviewerId, reason);
+    if (!request) throw BadRequest('This request has already been reviewed');
+
     await audit({
       actorId: reviewerId,
       action: 'REQUEST_REJECTED',

@@ -13,6 +13,7 @@ export interface UserRow {
   is_active: boolean;
   failed_attempts: number;
   locked_until: Date | null;
+  must_change_password: boolean;
 }
 
 export class AuthRepository extends BaseRepository<UserRow> {
@@ -70,6 +71,14 @@ export class AuthRepository extends BaseRepository<UserRow> {
           SET failed_attempts = 0, locked_until = NULL, last_login_at = now()
         WHERE id = $1`,
       [userId],
+    );
+  }
+
+  /** Self-service password change — also clears the forced-change flag. */
+  async changePassword(userId: string, passwordHash: string): Promise<void> {
+    await query(
+      `UPDATE users SET password_hash = $2, must_change_password = false WHERE id = $1`,
+      [userId, passwordHash],
     );
   }
 

@@ -27,6 +27,9 @@ export function authenticate(req: Request, _res: Response, next: NextFunction) {
 export function requirePermission(...required: string[]) {
   return (req: Request, _res: Response, next: NextFunction) => {
     if (!req.user) return next(Unauthorized());
+    // A forced password change blocks every business endpoint (all of them go
+    // through requirePermission) until the user sets a new password.
+    if (req.user.pwc) return next(Forbidden('Password change required before using the app'));
     const held = new Set(req.user.perms);
     const missing = required.filter((p) => !held.has(p));
     if (missing.length) return next(Forbidden(`Missing permission: ${missing.join(', ')}`));

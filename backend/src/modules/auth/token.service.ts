@@ -6,6 +6,7 @@ export interface AccessTokenPayload {
   sub: string; // user id
   role: string; // role name
   perms: string[]; // permission codes
+  pwc?: boolean; // must change password before using the app
 }
 
 export const signAccessToken = (payload: AccessTokenPayload): string =>

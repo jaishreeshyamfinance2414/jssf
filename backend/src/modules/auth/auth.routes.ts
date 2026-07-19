@@ -4,7 +4,7 @@ import { asyncHandler } from '../../shared/http';
 import { validate } from '../../middleware/validate';
 import { authenticate } from '../../middleware/auth';
 import { authController } from './auth.controller';
-import { loginSchema } from './auth.schema';
+import { loginSchema, changePasswordSchema } from './auth.schema';
 
 const router = Router();
 
@@ -22,5 +22,11 @@ router.post('/login', loginLimiter, validate({ body: loginSchema }), asyncHandle
 router.post('/refresh', asyncHandler(authController.refresh));
 router.post('/logout', asyncHandler(authController.logout));
 router.get('/me', authenticate, asyncHandler(authController.me));
+router.post(
+  '/change-password',
+  authenticate,
+  validate({ body: changePasswordSchema }),
+  asyncHandler(authController.changePassword),
+);
 
 export default router;

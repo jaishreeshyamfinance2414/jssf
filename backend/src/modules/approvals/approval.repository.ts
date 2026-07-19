@@ -74,21 +74,34 @@ export const approvalRepository = {
     return rows[0] ?? null;
   },
 
-  async markApproved(id: string, reviewerId: string, note: string | null): Promise<void> {
-    await query(
+  /**
+   * Atomically claim a pending request for review. The `status = 'pending'`
+   * guard makes concurrent reviews race-safe: exactly one caller gets the row
+   * back, everyone else gets null.
+   */
+  async claim(
+    id: string,
+    status: 'approved' | 'rejected',
+    reviewerId: string,
+    note: string | null,
+  ): Promise<ApprovalRequestRow | null> {
+    const { rows } = await query<ApprovalRequestRow>(
       `UPDATE approval_requests
-          SET status = 'approved', reviewed_by = $2, reviewed_at = now(), review_note = $3
-        WHERE id = $1`,
-      [id, reviewerId, note],
+          SET status = $2::approval_status, reviewed_by = $3, reviewed_at = now(), review_note = $4
+        WHERE id = $1 AND status = 'pending'
+        RETURNING *`,
+      [id, status, reviewerId, note],
     );
+    return rows[0] ?? null;
   },
 
-  async markRejected(id: string, reviewerId: string, note: string | null): Promise<void> {
+  /** Roll a claimed request back to pending when executing its action failed. */
+  async revertToPending(id: string): Promise<void> {
     await query(
       `UPDATE approval_requests
-          SET status = 'rejected', reviewed_by = $2, reviewed_at = now(), review_note = $3
+          SET status = 'pending', reviewed_by = NULL, reviewed_at = NULL, review_note = NULL
         WHERE id = $1`,
-      [id, reviewerId, note],
+      [id],
     );
   },
 };

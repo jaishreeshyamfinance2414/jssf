@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { ForceChangePassword } from '@/components/auth/force-change-password';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
 
@@ -34,6 +35,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
+
+  // Temporary/seeded password — the backend blocks all business endpoints
+  // until it's replaced, so show only the change form.
+  if (user.mustChangePassword) return <ForceChangePassword />;
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">

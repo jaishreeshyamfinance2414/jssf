@@ -52,6 +52,8 @@ export const userController = {
     const body = req.body as ResetPasswordBody;
     const passwordHash = await argon2.hash(body.newPassword);
     await userRepository.resetPassword(req.params.id, passwordHash);
+    // Kill the target's existing sessions — old credentials must stop working.
+    await authRepository.revokeAllForUser(req.params.id);
     await audit({
       actorId: req.user!.sub,
       action: 'PASSWORD_RESET',

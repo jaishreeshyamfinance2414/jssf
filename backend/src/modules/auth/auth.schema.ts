@@ -7,3 +7,14 @@ export const loginSchema = z.object({
 });
 
 export type LoginBody = z.infer<typeof loginSchema>;
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password required'),
+  newPassword: z
+    .string()
+    .min(8, 'At least 8 characters')
+    .regex(/[a-zA-Z]/, 'Must contain a letter')
+    .regex(/[0-9]/, 'Must contain a number'),
+});
+
+export type ChangePasswordBody = z.infer<typeof changePasswordSchema>;

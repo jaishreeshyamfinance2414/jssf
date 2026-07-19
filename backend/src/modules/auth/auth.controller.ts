@@ -65,6 +65,22 @@ export const authController = {
       mobile: user.mobile,
       role: user.role_name,
       permissions: req.user.perms,
+      mustChangePassword: user.must_change_password,
     });
+  },
+
+  /** Self-service password change; clears must_change_password and re-issues tokens. */
+  async changePassword(req: Request, res: Response) {
+    if (!req.user) throw Unauthorized();
+    const { currentPassword, newPassword } = req.body;
+    await authService.changePassword(req.user.sub, currentPassword, newPassword, req.ip);
+    // All sessions were revoked — issue a fresh pair so this session continues.
+    const result = await authService.issueSession(
+      req.user.sub,
+      req.ip,
+      req.headers['user-agent'] ?? null,
+    );
+    setRefreshCookie(res, result.refreshToken, result.refreshExpiresAt);
+    return ok(res, { accessToken: result.accessToken, user: result.user });
   },
 };

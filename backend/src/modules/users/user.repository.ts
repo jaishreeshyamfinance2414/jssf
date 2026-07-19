@@ -67,7 +67,11 @@ export const userRepository = {
   },
 
   async resetPassword(userId: string, passwordHash: string): Promise<void> {
-    await query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [userId, passwordHash]);
+    // Admin-set temporary password: the user must replace it on next login.
+    await query(
+      `UPDATE users SET password_hash = $2, must_change_password = true WHERE id = $1`,
+      [userId, passwordHash],
+    );
   },
 
   async unlock(userId: string): Promise<void> {

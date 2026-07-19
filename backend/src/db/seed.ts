@@ -1,6 +1,6 @@
 import argon2 from 'argon2';
 import { pool, withTransaction } from './pool';
-import { env } from '../config/env';
+import { env, isProd } from '../config/env';
 import { logger } from '../config/logger';
 
 /**
@@ -98,6 +98,22 @@ const SETTINGS: Array<[string, unknown, string]> = [
 ];
 
 async function seed() {
+  // ── Production guards ──
+  // Never allow the well-known default admin password in production, and
+  // never create the demo agent accounts there.
+  if (isProd) {
+    if (!process.env.SEED_ADMIN_PASSWORD || env.SEED_ADMIN_PASSWORD === 'Admin@123') {
+      logger.error(
+        'Refusing to seed in production without an explicit strong SEED_ADMIN_PASSWORD (the default Admin@123 is not allowed).',
+      );
+      process.exit(1);
+    }
+    if (env.SEED_ADMIN_PASSWORD.length < 12) {
+      logger.error('SEED_ADMIN_PASSWORD must be at least 12 characters in production.');
+      process.exit(1);
+    }
+  }
+
   await withTransaction(async (c) => {
     // Roles
     await c.query(
@@ -186,28 +202,32 @@ async function seed() {
        ON CONFLICT DO NOTHING`,
     );
 
-    // Admin user
+    // Admin user — must set their own password on first login.
     const hash = await argon2.hash(env.SEED_ADMIN_PASSWORD);
     await c.query(
-      `INSERT INTO users(role_id, full_name, email, mobile, password_hash)
-       SELECT r.id, 'Administrator', $1, $2, $3 FROM roles r WHERE r.name='admin'
+      `INSERT INTO users(role_id, full_name, email, mobile, password_hash, must_change_password)
+       SELECT r.id, 'Administrator', $1, $2, $3, true FROM roles r WHERE r.name='admin'
        ON CONFLICT (mobile) DO NOTHING`,
       [env.SEED_ADMIN_EMAIL, env.SEED_ADMIN_MOBILE, hash],
     );
 
-    const agentHash = await argon2.hash('Agent@123');
-    for (const agent of COLLECTION_AGENTS) {
-      await c.query(
-        `INSERT INTO users(role_id, full_name, email, mobile, password_hash)
-         SELECT r.id, $1, $2, $3, $4 FROM roles r WHERE r.name='collection_agent'
-         ON CONFLICT (mobile) DO NOTHING`,
-        [agent.fullName, agent.email, agent.mobile, agentHash],
-      );
+    // Demo collection agents — development/testing only, never in production.
+    if (!isProd) {
+      const agentHash = await argon2.hash('Agent@123');
+      for (const agent of COLLECTION_AGENTS) {
+        await c.query(
+          `INSERT INTO users(role_id, full_name, email, mobile, password_hash, must_change_password)
+           SELECT r.id, $1, $2, $3, $4, true FROM roles r WHERE r.name='collection_agent'
+           ON CONFLICT (mobile) DO NOTHING`,
+          [agent.fullName, agent.email, agent.mobile, agentHash],
+        );
+      }
     }
   });
 
+  // Never log the password itself.
   logger.info(
-    `Seed complete. Admin login → email:${env.SEED_ADMIN_EMAIL} mobile:${env.SEED_ADMIN_MOBILE} password:${env.SEED_ADMIN_PASSWORD}`,
+    `Seed complete. Admin login → email:${env.SEED_ADMIN_EMAIL} mobile:${env.SEED_ADMIN_MOBILE} (password: value of SEED_ADMIN_PASSWORD — must be changed on first login)`,
   );
   await pool.end();
 }

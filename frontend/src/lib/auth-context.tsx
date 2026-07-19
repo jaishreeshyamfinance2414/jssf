@@ -10,6 +10,7 @@ export interface AuthUser {
   mobile: string;
   role: string;
   permissions: string[];
+  mustChangePassword?: boolean;
 }
 
 interface AuthContextValue {
@@ -17,6 +18,7 @@ interface AuthContextValue {
   loading: boolean;
   login: (identifier: string, password: string, rememberMe: boolean) => Promise<void>;
   logout: () => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   can: (permission: string) => boolean;
 }
 
@@ -59,13 +61,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
+    const res = await apiPost<{ accessToken: string }>('/auth/change-password', {
+      currentPassword,
+      newPassword,
+    });
+    setAccessToken(res.accessToken);
+    setUser(await apiGet<AuthUser>('/auth/me'));
+  }, []);
+
   const can = useCallback(
     (permission: string) => !!user && user.permissions.includes(permission),
     [user],
   );
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, can }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, changePassword, can }}>
       {children}
     </AuthContext.Provider>
   );
