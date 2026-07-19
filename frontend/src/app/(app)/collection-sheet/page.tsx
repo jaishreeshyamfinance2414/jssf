@@ -23,6 +23,8 @@ interface SheetRow {
   next_due_date: string | null;
   missed_count: number;
   due_till_today: string;
+  advance_count: number;
+  advance_amount: string;
   received: string;
   remaining: string;
   today_type: string | null; // full | partial | advance | missed — null when untouched today
@@ -210,9 +212,15 @@ export default function CollectionSheetPage() {
                         {money(r.emi_amount)} <span className="text-xs text-muted-foreground">({r.emi_frequency})</span>
                       </td>
                       <td className="px-4 py-3 align-top">
-                        {r.missed_count > 0 ? <span className="font-medium text-danger">{r.missed_count}</span> : '0'}
+                        {r.missed_count > 0 ? <span className="font-medium text-danger">{r.missed_count}</span>
+                          : r.advance_count > 0 ? <span className="font-medium text-success">-{r.advance_count}</span>
+                          : '0'}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 align-top font-medium">{money(r.due_till_today)}</td>
+                      <td className="whitespace-nowrap px-4 py-3 align-top font-medium">
+                        {Number(r.due_till_today) <= 0 && Number(r.advance_amount) > 0
+                          ? <span className="text-success">-{money(r.advance_amount)}</span>
+                          : money(r.due_till_today)}
+                      </td>
                       <td className="px-4 py-3 align-top">{daysCompleted(r)}</td>
                       <td className="px-4 py-3 align-top">{remainDays ?? '-'}</td>
                       <td className="whitespace-nowrap px-4 py-3 align-top">{date(r.start_date)}</td>

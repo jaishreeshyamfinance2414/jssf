@@ -44,6 +44,11 @@ export const collectionRepository = {
               (SELECT COALESCE(sum(m.due_amount - m.paid_amount), 0) FROM emi_schedule m
                 WHERE m.loan_id = l.id AND m.due_date <= CURRENT_DATE
                   AND m.paid_amount < m.due_amount)::text AS due_till_today,
+              (SELECT count(*) FROM emi_schedule m
+                WHERE m.loan_id = l.id AND m.due_date >= CURRENT_DATE
+                  AND m.paid_amount >= m.due_amount)::int AS advance_count,
+              (SELECT COALESCE(sum(m.paid_amount), 0) FROM emi_schedule m
+                WHERE m.loan_id = l.id AND m.due_date > CURRENT_DATE)::text AS advance_amount,
               COALESCE((SELECT sum(co.amount) FROM collections co WHERE co.loan_id = l.id), 0)::text AS received,
               GREATEST(0, l.total_payable - COALESCE((
                 SELECT sum(co.amount) FROM collections co WHERE co.loan_id = l.id
