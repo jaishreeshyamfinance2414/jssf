@@ -37,7 +37,13 @@ const schema = z.object({
     .transform((v) => v === 'true'),
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
   COOKIE_DOMAIN: z.string().default(''),
-  COOKIE_SECURE: z.coerce.boolean().default(false),
+  // NOT z.coerce.boolean() — Boolean('false') is true, which would silently
+  // mark every cookie Secure and break HTTP LAN access (browsers refuse to
+  // store Secure cookies over plain http:// except on localhost).
+  COOKIE_SECURE: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true'),
 
   UPLOAD_DIR: z.string().default('./uploads'),
   MAX_UPLOAD_MB: z.coerce.number().default(5),

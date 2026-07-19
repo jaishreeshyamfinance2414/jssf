@@ -28,12 +28,28 @@ export interface AuthResult {
 // Progressive lock: after MAX attempts, lock for 15 minutes.
 const LOCK_MINUTES = 15;
 
+// A revoked token replayed within this window is treated as a benign race
+// (parallel tabs, network retry) rather than theft — rejected, but without
+// nuking the user's other sessions.
+const REUSE_GRACE_MS = 30_000;
+
+// Verified against when the identifier doesn't match any account, so unknown
+// and known identifiers take the same time to reject (no user enumeration via
+// response timing). Any valid argon2 hash of a throwaway string works.
+const DUMMY_HASH =
+  '$argon2id$v=19$m=65536,t=3,p=4$9ahkZGOBt8Pm7ds/cr4Qrg$7bP2IYUPLuRJrHbb1U23ffbbBUSbpqw2SUrzx6+QJO0';
+
 export const authService = {
   async login(input: LoginInput): Promise<AuthResult> {
     const user = await authRepository.findByIdentifier(input.identifier);
 
-    // Uniform failure to avoid leaking which accounts exist.
-    if (!user) throw Unauthorized('Invalid credentials');
+    // Uniform failure to avoid leaking which accounts exist — including via
+    // timing: burn an argon2 verify against a dummy hash so "no such user"
+    // takes as long as "wrong password".
+    if (!user) {
+      await argon2.verify(DUMMY_HASH, input.password).catch(() => false);
+      throw Unauthorized('Invalid credentials');
+    }
 
     if (!user.is_active) throw Unauthorized('Account is disabled');
 
@@ -82,6 +98,7 @@ export const authService = {
       refreshExpiresAt,
       input.userAgent ?? null,
       input.ip ?? null,
+      input.rememberMe ?? false,
     );
 
     await audit({
@@ -113,20 +130,25 @@ export const authService = {
     const record = await authRepository.findValidRefreshToken(hash);
     if (!record) {
       // Reuse detection: a known-but-revoked token being replayed means it was
-      // already rotated — a strong theft indicator. Kill every session for that
-      // user so the stolen token family can't be used any further.
+      // already rotated. Within a short grace window this is almost always a
+      // benign race (second browser tab, network retry, dev double-mount) — we
+      // reject it but leave other sessions alone. Beyond the grace window it's
+      // a theft indicator: kill every session for that user.
       const stale = await authRepository.findRefreshTokenIncludingRevoked(hash);
       if (stale?.revoked_at) {
-        await authRepository.revokeAllForUser(stale.user_id);
-        await audit({
-          actorId: stale.user_id,
-          action: 'REFRESH_TOKEN_REUSE',
-          entity: 'user',
-          entityId: stale.user_id,
-          meta: { tokenId: stale.id },
-          ip,
-          userAgent,
-        });
+        const ageMs = Date.now() - stale.revoked_at.getTime();
+        if (ageMs > REUSE_GRACE_MS) {
+          await authRepository.revokeAllForUser(stale.user_id);
+          await audit({
+            actorId: stale.user_id,
+            action: 'REFRESH_TOKEN_REUSE',
+            entity: 'user',
+            entityId: stale.user_id,
+            meta: { tokenId: stale.id, revokedAgoMs: ageMs },
+            ip,
+            userAgent,
+          });
+        }
       }
       throw Unauthorized('Invalid refresh token');
     }
@@ -147,9 +169,19 @@ export const authService = {
       ...(user.must_change_password ? { pwc: true } : {}),
     });
 
+    // Preserve the session's original lifetime: a "remember me" login keeps its
+    // long TTL across rotations instead of shrinking to the default on first refresh.
     const { raw, hash: newHash } = createRefreshToken();
-    const refreshExpiresAt = new Date(Date.now() + ms(env.JWT_REFRESH_TTL));
-    await authRepository.storeRefreshToken(user.id, newHash, refreshExpiresAt, userAgent ?? null, ip ?? null);
+    const ttl = record.remember ? env.JWT_REFRESH_TTL_REMEMBER : env.JWT_REFRESH_TTL;
+    const refreshExpiresAt = new Date(Date.now() + ms(ttl));
+    await authRepository.storeRefreshToken(
+      user.id,
+      newHash,
+      refreshExpiresAt,
+      userAgent ?? null,
+      ip ?? null,
+      record.remember,
+    );
 
     return { accessToken, refreshToken: raw, refreshExpiresAt };
   },

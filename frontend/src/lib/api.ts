@@ -32,6 +32,26 @@ api.interceptors.request.use((config) => {
 
 let refreshing: Promise<string> | null = null;
 
+/**
+ * Single-flight session refresh. Refresh tokens are single-use (rotated on
+ * every call), so concurrent refreshes with the same cookie would race — the
+ * loser presents an already-revoked token and gets 401. Everyone shares one
+ * in-flight request instead.
+ */
+export function refreshAccessToken(): Promise<string> {
+  refreshing ??= api
+    .post<{ data: { accessToken: string } }>('/auth/refresh')
+    .then((r) => {
+      const token = r.data.data.accessToken;
+      setAccessToken(token);
+      return token;
+    })
+    .finally(() => {
+      refreshing = null;
+    });
+  return refreshing;
+}
+
 api.interceptors.response.use(
   (res) => res,
   async (error: AxiosError) => {
@@ -41,17 +61,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !original?._retry && !isAuthCall) {
       original._retry = true;
       try {
-        refreshing ??= api
-          .post<{ data: { accessToken: string } }>('/auth/refresh')
-          .then((r) => {
-            const token = r.data.data.accessToken;
-            setAccessToken(token);
-            return token;
-          })
-          .finally(() => {
-            refreshing = null;
-          });
-        const token = await refreshing;
+        const token = await refreshAccessToken();
         original.headers.Authorization = `Bearer ${token}`;
         return api(original);
       } catch {

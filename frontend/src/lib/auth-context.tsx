@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { api, apiGet, apiPost, setAccessToken } from './api';
+import { apiGet, apiPost, refreshAccessToken, setAccessToken } from './api';
 
 export interface AuthUser {
   id: string;
@@ -28,12 +28,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // On mount, try to restore a session via the refresh cookie.
+  // On mount, try to restore a session via the refresh cookie. Uses the shared
+  // single-flight refresh so this can't race the 401-retry interceptor (the
+  // refresh token is single-use — two parallel refreshes would log us out).
+  // React 18 StrictMode also double-invokes effects in dev; single-flight
+  // makes the second invocation reuse the first request instead of burning
+  // the freshly-rotated token.
   useEffect(() => {
     (async () => {
       try {
-        const { data } = await api.post<{ data: { accessToken: string } }>('/auth/refresh');
-        setAccessToken(data.data.accessToken);
+        await refreshAccessToken();
         setUser(await apiGet<AuthUser>('/auth/me'));
       } catch {
         setUser(null);

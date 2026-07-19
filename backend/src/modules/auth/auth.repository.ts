@@ -89,17 +89,18 @@ export class AuthRepository extends BaseRepository<UserRow> {
     expiresAt: Date,
     ua: string | null,
     ip: string | null,
+    remember = false,
   ): Promise<void> {
     await query(
-      `INSERT INTO refresh_tokens(user_id, token_hash, expires_at, user_agent, ip)
-       VALUES ($1,$2,$3,$4,$5)`,
-      [userId, tokenHash, expiresAt, ua, ip],
+      `INSERT INTO refresh_tokens(user_id, token_hash, expires_at, user_agent, ip, remember)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [userId, tokenHash, expiresAt, ua, ip, remember],
     );
   }
 
   async findValidRefreshToken(tokenHash: string) {
-    const { rows } = await query<{ id: string; user_id: string }>(
-      `SELECT id, user_id FROM refresh_tokens
+    const { rows } = await query<{ id: string; user_id: string; remember: boolean }>(
+      `SELECT id, user_id, remember FROM refresh_tokens
         WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
         LIMIT 1`,
       [tokenHash],
@@ -109,8 +110,15 @@ export class AuthRepository extends BaseRepository<UserRow> {
 
   /** Look up a token regardless of revocation state — used for reuse detection. */
   async findRefreshTokenIncludingRevoked(tokenHash: string) {
-    const { rows } = await query<{ id: string; user_id: string; revoked_at: Date | null }>(
-      `SELECT id, user_id, revoked_at FROM refresh_tokens WHERE token_hash = $1 LIMIT 1`,
+    const { rows } = await query<{
+      id: string;
+      user_id: string;
+      revoked_at: Date | null;
+      expires_at: Date;
+      remember: boolean;
+    }>(
+      `SELECT id, user_id, revoked_at, expires_at, remember
+         FROM refresh_tokens WHERE token_hash = $1 LIMIT 1`,
       [tokenHash],
     );
     return rows[0] ?? null;
