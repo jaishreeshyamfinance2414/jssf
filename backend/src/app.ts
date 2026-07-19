@@ -7,12 +7,16 @@ import pinoHttp from 'pino-http';
 import { env, isProd } from './config/env';
 import { logger } from './config/logger';
 import api from './routes';
+import { query } from './db/pool';
 import { errorHandler, notFoundHandler } from './middleware/error';
 
 export function createApp(): Application {
   const app = express();
 
-  app.set('trust proxy', 1); // correct req.ip behind a reverse proxy
+  // Honour X-Forwarded-For only when explicitly deployed behind a reverse
+  // proxy — trusting it unconditionally lets direct clients spoof req.ip
+  // (defeating the login rate limiter and forging audit-log IPs).
+  if (env.TRUST_PROXY) app.set('trust proxy', 1);
 
   // ── Security headers ──
   app.use(helmet());
@@ -46,8 +50,15 @@ export function createApp(): Application {
     }),
   );
 
-  // ── Health check ──
-  app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }));
+  // ── Health check ── verifies DB connectivity so monitors see a dead Postgres.
+  app.get('/health', async (_req, res) => {
+    try {
+      await query('SELECT 1');
+      res.json({ status: 'ok', db: 'up', ts: new Date().toISOString() });
+    } catch {
+      res.status(503).json({ status: 'degraded', db: 'down', ts: new Date().toISOString() });
+    }
+  });
   // Uploaded documents are PII — served only via the authenticated /files route
   // (see modules/files/files.routes.ts), never via unauthenticated express.static.
 

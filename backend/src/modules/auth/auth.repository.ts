@@ -107,6 +107,15 @@ export class AuthRepository extends BaseRepository<UserRow> {
     return rows[0] ?? null;
   }
 
+  /** Look up a token regardless of revocation state — used for reuse detection. */
+  async findRefreshTokenIncludingRevoked(tokenHash: string) {
+    const { rows } = await query<{ id: string; user_id: string; revoked_at: Date | null }>(
+      `SELECT id, user_id, revoked_at FROM refresh_tokens WHERE token_hash = $1 LIMIT 1`,
+      [tokenHash],
+    );
+    return rows[0] ?? null;
+  }
+
   async revokeRefreshToken(tokenHash: string, client?: PoolClient): Promise<void> {
     const sql = `UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1`;
     if (client) await client.query(sql, [tokenHash]);

@@ -17,6 +17,10 @@ const schema = z.object({
   PGPASSWORD: z.string().default('postgres'),
   PGDATABASE: z.string().default('jssf'),
   PG_POOL_MAX: z.coerce.number().default(10),
+  // 'disable' = plaintext (local dev); 'require' = TLS without CA verification
+  // (typical managed Postgres with self-signed chain); 'verify-full' = TLS with
+  // full certificate verification.
+  PGSSLMODE: z.enum(['disable', 'require', 'verify-full']).default('disable'),
 
   JWT_ACCESS_SECRET: z.string().min(16),
   JWT_REFRESH_SECRET: z.string().min(16),
@@ -25,6 +29,12 @@ const schema = z.object({
   JWT_REFRESH_TTL_REMEMBER: z.string().default('30d'),
 
   MAX_LOGIN_ATTEMPTS: z.coerce.number().default(5),
+  // Set to 'true' ONLY when deployed behind a reverse proxy (nginx, etc.) —
+  // otherwise clients can spoof X-Forwarded-For to fake their IP.
+  TRUST_PROXY: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true'),
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
   COOKIE_DOMAIN: z.string().default(''),
   COOKIE_SECURE: z.coerce.boolean().default(false),

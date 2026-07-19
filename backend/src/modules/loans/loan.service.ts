@@ -126,6 +126,14 @@ export const loanService = {
       if (totalPayable < principal) {
         throw BadRequest('Total EMI return cannot be less than loan amount');
       }
+      // An active loan may already have collections against it — shrinking the
+      // total below what's collected would make the remaining balance negative.
+      const collected = await collectionRepository.totalCollectedForLoan(id, client);
+      if (totalPayable < collected) {
+        throw BadRequest(
+          `Total EMI return (${totalPayable}) cannot be less than the amount already collected (${collected})`,
+        );
+      }
       const interestAmount = Number((totalPayable - principal).toFixed(2));
       const interestRate = principal > 0 ? Number(((interestAmount / principal) * 100).toFixed(3)) : 0;
       const processingFee = Number(((principal * Number(loan.processing_fee_pct)) / 100).toFixed(2));

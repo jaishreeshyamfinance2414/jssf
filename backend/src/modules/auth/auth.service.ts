@@ -111,10 +111,31 @@ export const authService = {
   async refresh(rawRefreshToken: string, ip?: string | null, userAgent?: string | null) {
     const hash = hashRefreshToken(rawRefreshToken);
     const record = await authRepository.findValidRefreshToken(hash);
-    if (!record) throw Unauthorized('Invalid refresh token');
+    if (!record) {
+      // Reuse detection: a known-but-revoked token being replayed means it was
+      // already rotated — a strong theft indicator. Kill every session for that
+      // user so the stolen token family can't be used any further.
+      const stale = await authRepository.findRefreshTokenIncludingRevoked(hash);
+      if (stale?.revoked_at) {
+        await authRepository.revokeAllForUser(stale.user_id);
+        await audit({
+          actorId: stale.user_id,
+          action: 'REFRESH_TOKEN_REUSE',
+          entity: 'user',
+          entityId: stale.user_id,
+          meta: { tokenId: stale.id },
+          ip,
+          userAgent,
+        });
+      }
+      throw Unauthorized('Invalid refresh token');
+    }
 
     const user = await authRepository.findByIdWithRole(record.user_id);
     if (!user || !user.is_active) throw Unauthorized('User unavailable');
+    if (user.locked_until && user.locked_until > new Date()) {
+      throw Locked('Account locked due to failed attempts. Try later or contact admin.');
+    }
 
     // Rotate: revoke the presented token, mint a fresh access + refresh pair.
     await authRepository.revokeRefreshToken(hash);

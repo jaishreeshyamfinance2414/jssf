@@ -6,9 +6,23 @@ import { logger } from '../config/logger';
  * Single shared connection pool. All DB access flows through here so we get
  * consistent logging, pooling limits, and a single place to add read-replicas later.
  */
+/**
+ * TLS for remote/managed Postgres, gated by PGSSLMODE:
+ *   disable      → plaintext (local dev default)
+ *   require      → encrypted, but no CA verification (managed providers with
+ *                  self-signed chains, e.g. Heroku/RDS without CA bundle)
+ *   verify-full  → encrypted with full certificate verification
+ */
+const ssl =
+  env.PGSSLMODE === 'disable'
+    ? undefined
+    : env.PGSSLMODE === 'require'
+      ? { rejectUnauthorized: false }
+      : { rejectUnauthorized: true };
+
 export const pool = new Pool(
   env.DATABASE_URL
-    ? { connectionString: env.DATABASE_URL, max: env.PG_POOL_MAX }
+    ? { connectionString: env.DATABASE_URL, max: env.PG_POOL_MAX, ssl }
     : {
         host: env.PGHOST,
         port: env.PGPORT,
@@ -16,6 +30,7 @@ export const pool = new Pool(
         password: env.PGPASSWORD,
         database: env.PGDATABASE,
         max: env.PG_POOL_MAX,
+        ssl,
       },
 );
 
