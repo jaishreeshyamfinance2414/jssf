@@ -216,7 +216,7 @@ export const dashboardRepository = {
       `SELECT COALESCE(SUM(CASE WHEN t.direction='credit' THEN t.amount ELSE -t.amount END), 0)::text AS s
          FROM accounts a
          LEFT JOIN account_transactions t ON t.account_id = a.id
-        WHERE a.is_active = true AND a.type = 'cash'`,
+        WHERE a.is_active = true AND a.type IN ('cash','bank')`,
     );
     return Number(rows[0].s);
   },
@@ -233,7 +233,10 @@ export const dashboardRepository = {
   async areaWiseCollection(): Promise<Array<{ area: string; amount: number }>> {
     const { rows } = await query<{ area: string; amount: string }>(
       `SELECT COALESCE(a.name,'Unassigned') AS area, sum(c.amount)::text AS amount
-         FROM collections c LEFT JOIN areas a ON a.id = c.area_id
+         FROM collections c
+         JOIN loans l ON l.id = c.loan_id
+         JOIN customers cu ON cu.id = l.customer_id
+         LEFT JOIN areas a ON a.id = COALESCE(c.area_id, cu.area_id)
         WHERE c.collected_at::date = CURRENT_DATE
         GROUP BY a.name ORDER BY sum(c.amount) DESC`,
     );
