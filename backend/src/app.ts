@@ -1,5 +1,4 @@
 import express, { Application } from 'express';
-import path from 'node:path';
 import helmet from 'helmet';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -49,17 +48,8 @@ export function createApp(): Application {
 
   // ── Health check ──
   app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }));
-  // Uploaded docs/photos are embedded (img/iframe) by the frontend on a different
-  // origin/port, so they need CORP relaxed — helmet's default 'same-origin' would
-  // otherwise let the file download via direct navigation but block inline previews.
-  app.use(
-    '/uploads',
-    (_req, res, next) => {
-      res.set('Cross-Origin-Resource-Policy', 'cross-origin');
-      next();
-    },
-    express.static(path.resolve(env.UPLOAD_DIR)),
-  );
+  // Uploaded documents are PII — served only via the authenticated /files route
+  // (see modules/files/files.routes.ts), never via unauthenticated express.static.
 
   // ── API ──
   app.use(env.API_PREFIX, api);

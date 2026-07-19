@@ -23,6 +23,11 @@ router.get(
     const { category, filename } = req.params;
     const resolved = path.resolve(UPLOAD_ROOT, category, filename);
     if (!resolved.startsWith(UPLOAD_ROOT + path.sep)) throw NotFound('File not found');
+    // Defense-in-depth against stored XSS: never let the browser execute an
+    // uploaded file in the API origin, even if a malicious one slipped through.
+    res.set('Content-Disposition', 'attachment');
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('Content-Security-Policy', "default-src 'none'; sandbox");
     res.sendFile(resolved, (err) => {
       if (err && !res.headersSent) res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'File not found' } });
     });

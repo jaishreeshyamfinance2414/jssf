@@ -80,3 +80,14 @@ export async function apiDelete<T>(url: string): Promise<T> {
   const { data } = await api.delete<{ data: T }>(url);
   return data.data;
 }
+
+/**
+ * Fetch a protected uploaded document (PII — served only via the authenticated
+ * /files route) and return an object URL for use in <img>/<iframe>/<a>.
+ * Caller must revoke the URL when done (URL.revokeObjectURL).
+ */
+export async function fetchFileUrl(path: string): Promise<string> {
+  const clean = path.replaceAll('\\', '/');
+  const { data } = await api.get(`/files/${clean}`, { responseType: 'blob' });
+  return URL.createObjectURL(data);
+}

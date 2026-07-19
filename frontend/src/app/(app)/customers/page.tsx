@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
 import { ArrowUpDown, Eye, Plus, Search, Trash2, Upload } from 'lucide-react';
-import { API_ORIGIN, api, apiDelete, apiGet } from '@/lib/api';
+import { api, apiDelete, apiGet, fetchFileUrl } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { date, dateTime, money } from '@/lib/format';
 import { PageShell } from '@/components/app/page-shell';
@@ -454,6 +454,28 @@ function Info({ label, value }: { label: string; value: string | null | undefine
 }
 
 function Doc({ label, path }: { label: string; path: string | null | undefined }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!path) return;
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    fetchFileUrl(path)
+      .then((u) => {
+        if (cancelled) URL.revokeObjectURL(u);
+        else {
+          objectUrl = u;
+          setUrl(u);
+        }
+      })
+      .catch(() => !cancelled && setFailed(true));
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [path]);
+
   if (!path) {
     return (
       <div className="rounded-md border bg-muted/30 p-3 text-sm">
@@ -462,17 +484,22 @@ function Doc({ label, path }: { label: string; path: string | null | undefined }
       </div>
     );
   }
-  const url = `${API_ORIGIN}/uploads/${path.replaceAll('\\', '/')}`;
   const isPdf = path.toLowerCase().endsWith('.pdf');
   return (
     <div className="rounded-md border bg-muted/30 p-3 text-sm">
       <div className="mb-2 flex items-center justify-between">
         <span className="font-medium">{label}</span>
-        <a className="text-xs text-primary underline" href={url} target="_blank">
-          Open
-        </a>
+        {url && (
+          <a className="text-xs text-primary underline" href={url} target="_blank" rel="noopener noreferrer">
+            Open
+          </a>
+        )}
       </div>
-      {isPdf ? (
+      {failed ? (
+        <div className="text-muted-foreground">Failed to load</div>
+      ) : !url ? (
+        <div className="h-32 w-full animate-pulse rounded border bg-muted" />
+      ) : isPdf ? (
         <iframe src={url} className="h-32 w-full rounded border bg-white" title={label} />
       ) : (
         // eslint-disable-next-line @next/next/no-img-element

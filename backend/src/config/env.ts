@@ -46,3 +46,29 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 export const isProd = env.NODE_ENV === 'production';
+
+// ── Production hardening: refuse to boot with placeholder/weak JWT secrets ──
+// A known secret lets anyone forge admin tokens, so this must fail fast.
+if (isProd) {
+  const problems: string[] = [];
+  const looksPlaceholder = (s: string) =>
+    /change[-_]?me|placeholder|example|secret[-_]?here|your[-_]?secret|min[-_]?32/i.test(s);
+  for (const key of ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET'] as const) {
+    const value = env[key];
+    if (value.length < 32) problems.push(`${key} must be at least 32 characters in production`);
+    if (looksPlaceholder(value)) problems.push(`${key} looks like a placeholder — generate a real random secret`);
+    if (new Set(value).size < 10) problems.push(`${key} has too little variety — generate a real random secret`);
+  }
+  if (env.JWT_ACCESS_SECRET === env.JWT_REFRESH_SECRET) {
+    problems.push('JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different values');
+  }
+  if (problems.length) {
+    // eslint-disable-next-line no-console
+    console.error(
+      '❌ Refusing to start in production with unsafe secrets:\n' +
+        problems.map((p) => `   • ${p}`).join('\n') +
+        '\n   Generate with: node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'base64url\'))"',
+    );
+    process.exit(1);
+  }
+}

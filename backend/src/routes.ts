@@ -14,6 +14,7 @@ import approvalRoutes from './modules/approvals/approval.routes';
 import reportRoutes from './modules/reports/reports.routes';
 import auditRoutes from './modules/audit/audit.routes';
 import salaryRoutes from './modules/salary/salary.routes';
+import fileRoutes from './modules/files/files.routes';
 
 /**
  * Central API router. New modules (customers, loans, collections, expenses,
@@ -36,6 +37,7 @@ api.use('/approval-requests', approvalRoutes);
 api.use('/reports', reportRoutes);
 api.use('/audit', auditRoutes);
 api.use('/salaries', salaryRoutes);
+api.use('/files', fileRoutes);
 
 // Future modules — mount as they're implemented:
 // api.use('/settings', settingRoutes);

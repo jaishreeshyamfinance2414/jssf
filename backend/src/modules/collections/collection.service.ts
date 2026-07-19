@@ -42,6 +42,16 @@ export const collectionService = {
         }
       }
 
+      // The anchor EMI must belong to this loan — otherwise a crafted emiId
+      // could flip/penalize another loan's EMI.
+      if (input.emiId) {
+        const { rows: emi } = await client.query(
+          `SELECT 1 FROM emi_schedule WHERE id = $1 AND loan_id = $2`,
+          [input.emiId, input.loanId],
+        );
+        if (!emi[0]) throw BadRequest('EMI does not belong to this loan');
+      }
+
       // Strict one-entry-per-day rule: any entry (payment or missed marker)
       // already recorded today blocks a second one — the next entry can only
       // be made tomorrow. Also the backstop against accidental double-taps.
