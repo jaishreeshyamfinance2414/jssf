@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
 import { ArrowUpDown, Eye, Plus, Search, Trash2, Upload } from 'lucide-react';
@@ -98,6 +98,13 @@ export default function CustomersPage() {
     queryFn: () => apiGet<CustomerDetail>(`/customers/${selectedId}`),
     enabled: !!selectedId,
   });
+  // The details card renders above the customer list; on mobile the click
+  // leaves the viewport far below it, so scroll the card into view once
+  // its data arrives (covers both the Details button and ?focus= deep-links).
+  const detailRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (selected) detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [selected?.id]);
   const create = useMutation({
     mutationFn: async (form: FormData) => api.post('/customers', form),
     onSuccess: () => {
@@ -261,6 +268,7 @@ export default function CustomersPage() {
       {error && <div className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
       {info && <div className="rounded-md bg-primary/10 px-3 py-2 text-sm text-primary">{info}</div>}
       {selected && (
+        <div ref={detailRef} className="scroll-mt-4">
         <Card>
           <CardHeader>
             <CardTitle className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -399,6 +407,7 @@ export default function CustomersPage() {
             />
           </CardContent>
         </Card>
+        </div>
       )}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <div className="relative flex-1">

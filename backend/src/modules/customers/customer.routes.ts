@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
 import { authenticate, requirePermission } from '../../middleware/auth';
+import { requirePasskey } from '../../middleware/passkey';
 import { validate } from '../../middleware/validate';
 import { uploadTo, verifyUploadedFiles } from '../files/upload';
 import { createCustomerSchema, CUSTOMER_UPLOAD_FIELDS, updateCustomerSchema } from './customer.schema';
@@ -24,11 +25,12 @@ router.post(
 router.put(
   '/:id',
   requirePermission('customer.update'),
+  requirePasskey(),
   upload.fields(CUSTOMER_UPLOAD_FIELDS),
   asyncHandler(verifyUploadedFiles),
   validate({ body: updateCustomerSchema }),
   asyncHandler(customerController.update),
 );
-router.delete('/:id', requirePermission('customer.delete'), asyncHandler(customerController.delete));
+router.delete('/:id', requirePermission('customer.delete'), requirePasskey(), asyncHandler(customerController.delete));
 
 export default router;

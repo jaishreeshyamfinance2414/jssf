@@ -11,6 +11,7 @@
     "migrate": "tsx src/db/migrate.ts",
     "seed": "npm run migrate && tsx src/db/seed.ts",
     "sweep": "tsx src/scripts/sweep.ts",
+    "passkey": "tsx src/scripts/passkey.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

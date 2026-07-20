@@ -33,6 +33,17 @@ api.interceptors.request.use((config) => {
 let refreshing: Promise<string> | null = null;
 
 /**
+ * Admin passkey plumbing. The PasskeyProvider registers a prompt function;
+ * when the server answers 428 PASSKEY_REQUIRED we ask the user for the
+ * 4-digit PIN and retry the request with the x-admin-passkey header.
+ */
+type PasskeyPrompt = (message?: string) => Promise<string | null>;
+let passkeyPrompt: PasskeyPrompt | null = null;
+export const setPasskeyPrompt = (fn: PasskeyPrompt | null) => {
+  passkeyPrompt = fn;
+};
+
+/**
  * Single-flight session refresh. Refresh tokens are single-use (rotated on
  * every call), so concurrent refreshes with the same cookie would race — the
  * loser presents an already-revoked token and gets 401. Everyone shares one
@@ -68,6 +79,27 @@ api.interceptors.response.use(
         setAccessToken(null);
         if (typeof window !== 'undefined') window.location.href = '/login';
       }
+    }
+
+    // 428 = admin passkey required (or wrong). Prompt and retry with the PIN;
+    // a wrong PIN comes back as 428 again and re-prompts with the server's
+    // message, until the user cancels or the server locks (403).
+    if (error.response?.status === 428 && passkeyPrompt) {
+      const serverMsg = (error.response.data as { error?: { message?: string } })?.error?.message;
+      const pin = await passkeyPrompt(serverMsg);
+      if (pin) {
+        original.headers['x-admin-passkey'] = pin;
+        return api(original);
+      }
+      // user cancelled — surface a friendly error to the caller
+      return Promise.reject(
+        Object.assign(error, {
+          response: {
+            ...error.response,
+            data: { error: { message: 'Action cancelled — passkey not entered.' } },
+          },
+        }),
+      );
     }
     return Promise.reject(error);
   },
