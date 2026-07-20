@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
 import { ArrowUpDown, Eye, Plus, Search, Trash2, Upload } from 'lucide-react';
 import { api, apiDelete, apiGet, fetchFileUrl } from '@/lib/api';
+import { compressFormImages } from '@/lib/compress-image';
 import { useAuth } from '@/lib/auth-context';
 import { date, dateTime, money } from '@/lib/format';
 import { PageShell } from '@/components/app/page-shell';
@@ -131,9 +132,9 @@ export default function CustomersPage() {
     },
   });
 
-  const submit = (e: FormEvent<HTMLFormElement>) => {
+  const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    create.mutate(new FormData(e.currentTarget));
+    create.mutate(await compressFormImages(new FormData(e.currentTarget)));
   };
 
   const captureLocation = () => {
@@ -180,9 +181,9 @@ export default function CustomersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show]);
 
-  const submitEdit = (e: FormEvent<HTMLFormElement>) => {
+  const submitEdit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    update.mutate(new FormData(e.currentTarget));
+    update.mutate(await compressFormImages(new FormData(e.currentTarget)));
   };
 
   // Search by name, mobile, file number, or area — then sort.
@@ -248,7 +249,7 @@ export default function CustomersPage() {
                 {['photo', 'aadhaarDoc', 'panDoc', 'signature', 'guarantorPhoto', 'guarantorAadhaarDoc', 'guarantorPanDoc', 'guarantorSignature'].map((field) => (
                   <label key={field} className="rounded-md border bg-muted/40 p-3 text-xs font-medium">
                     <span className="mb-2 flex items-center gap-2"><Upload className="h-3.5 w-3.5" /> {field}</span>
-                    <input name={field} type="file" className="w-full text-xs" />
+                    <input name={field} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="w-full text-xs" />
                   </label>
                 ))}
               </div>
@@ -355,7 +356,7 @@ export default function CustomersPage() {
                             <Doc label={label} path={path} />
                             <label className="flex items-center gap-2 rounded-md border bg-muted/40 p-2 text-xs font-medium">
                               <Upload className="h-3.5 w-3.5" />
-                              <input name={field} type="file" className="w-full text-xs" />
+                              <input name={field} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="w-full text-xs" />
                             </label>
                           </div>
                         ))}
