@@ -192,7 +192,9 @@ export const collectionRepository = {
   /**
    * Agent explicitly marked the day missed — flip the EMI unless money already
    * covers it, and accrue the missed-day penalty (settings.penalty.per_day_pct
-   * % of the loan principal) onto the EMI's due and the loan's total payable.
+   * % of the loan principal) onto the EMI's missed_penalty and the loan's
+   * total payable. The EMI's due_amount is NOT touched — payments always fill
+   * base EMI days, and the penalty is recovered via the loan total instead.
    *
    * Grace rule: the FIRST miss of a streak is free — penalty applies only
    * from the 2nd consecutive missed day (previous installment also missed).
@@ -210,8 +212,7 @@ export const collectionRepository = {
        ),
        upd AS (
          UPDATE emi_schedule e
-            SET missed_penalty = round(l.principal * pen.pct / 100, 2),
-                due_amount = e.due_amount + round(l.principal * pen.pct / 100, 2)
+            SET missed_penalty = round(l.principal * pen.pct / 100, 2)
            FROM pen, loans l
           WHERE e.id = $1 AND l.id = e.loan_id
             AND e.status = 'missed' AND e.missed_penalty = 0 AND pen.pct > 0
@@ -233,7 +234,9 @@ export const collectionRepository = {
 
   /**
    * Undo a missed-day penalty when the entry that caused it is deleted —
-   * unless another 'missed' entry still anchors to the same EMI.
+   * unless another 'missed' entry still anchors to the same EMI. Only the
+   * loan's total_payable and the EMI's missed_penalty are reversed;
+   * due_amount was never inflated by the penalty.
    */
   async reverseMissedPenalty(emiId: string, excludeCollectionId: string, client: PoolClient) {
     await client.query(
@@ -248,7 +251,7 @@ export const collectionRepository = {
        ),
        upd AS (
          UPDATE emi_schedule e
-            SET due_amount = e.due_amount - o.missed_penalty, missed_penalty = 0
+            SET missed_penalty = 0
            FROM old o WHERE e.id = o.id
        )
        UPDATE loans l

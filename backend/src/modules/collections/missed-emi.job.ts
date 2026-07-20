@@ -40,15 +40,17 @@ export async function sweepMissedEmis(): Promise<{ missedMarked: number; penaliz
     // loan principal) onto newly missed EMIs. Grace rule: the first miss of a
     // streak is free — only the 2nd+ consecutive missed day is penalized
     // (previous installment also missed). missed_penalty=0 keeps this
-    // once-only per EMI.
+    // once-only per EMI. The penalty is tracked on missed_penalty and the
+    // loan's total_payable only — NOT on the EMI's due_amount — so payments
+    // always count against base EMI days and the missed count stays a pure
+    // days-behind figure.
     const penalized = await client.query(
       `WITH pen AS (
          SELECT COALESCE((value->>'per_day_pct')::numeric, 0) AS pct FROM settings WHERE key = 'penalty'
        ),
        upd AS (
          UPDATE emi_schedule e
-            SET missed_penalty = round(l.principal * pen.pct / 100, 2),
-                due_amount = e.due_amount + round(l.principal * pen.pct / 100, 2)
+            SET missed_penalty = round(l.principal * pen.pct / 100, 2)
            FROM pen, loans l
           WHERE l.id = e.loan_id AND l.status = 'active'
             AND e.status = 'missed' AND e.missed_penalty = 0 AND pen.pct > 0

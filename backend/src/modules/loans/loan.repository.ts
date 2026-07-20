@@ -306,12 +306,16 @@ export const loanRepository = {
 
   async markClosedIfFullyPaid(loanId: string, client: PoolClient): Promise<boolean> {
     // Compare amounts, not status — 'advance' rows are fully funded but not
-    // yet 'paid', and must count toward closure.
-    const { rows } = await client.query<{ remaining: string }>(
-      `SELECT count(*)::text AS remaining FROM emi_schedule WHERE loan_id = $1 AND paid_amount < due_amount`,
+    // yet 'paid', and must count toward closure. Missed-day penalties live on
+    // total_payable but NOT on EMI due_amounts, so closure additionally
+    // requires the collected total to cover total_payable (base + penalties).
+    const { rows } = await client.query<{ remaining: string; shortfall: string }>(
+      `SELECT (SELECT count(*) FROM emi_schedule WHERE loan_id = $1 AND paid_amount < due_amount)::text AS remaining,
+              (SELECT l.total_payable - COALESCE((SELECT sum(c.amount) FROM collections c WHERE c.loan_id = l.id), 0)
+                 FROM loans l WHERE l.id = $1)::text AS shortfall`,
       [loanId],
     );
-    if (Number(rows[0].remaining) > 0) return false;
+    if (Number(rows[0].remaining) > 0 || Number(rows[0].shortfall) > 0.01) return false;
     await client.query(`UPDATE loans SET status = 'closed', closed_at = now() WHERE id = $1`, [loanId]);
     return true;
   },
