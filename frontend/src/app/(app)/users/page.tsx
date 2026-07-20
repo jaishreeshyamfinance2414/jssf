@@ -3,7 +3,7 @@
 import { FormEvent, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
-import { KeyRound, Lock, Plus, UserCheck, UserX } from 'lucide-react';
+import { KeyRound, Lock, MonitorSmartphone, Plus, UserCheck, UserX, XCircle } from 'lucide-react';
 import { api, apiDelete, apiGet, apiPut } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { dateTime } from '@/lib/format';
@@ -32,6 +32,25 @@ const ROLES = [
   { value: 'collection_agent', label: 'Collection Agent' },
 ];
 
+interface Session {
+  id: string;
+  user_id: string;
+  full_name: string;
+  role_name: string;
+  ip: string | null;
+  user_agent: string | null;
+  created_at: string;
+  expires_at: string;
+}
+
+/** "Chrome · Android" style summary from a user-agent string. */
+function deviceLabel(ua: string | null): string {
+  if (!ua) return 'Unknown device';
+  const browser = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
+  const os = /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : 'Unknown OS';
+  return `${browser} · ${os}`;
+}
+
 export default function UsersPage() {
   const qc = useQueryClient();
   const { can, user } = useAuth();
@@ -40,7 +59,14 @@ export default function UsersPage() {
   const [resetting, setResetting] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [showSessions, setShowSessions] = useState(false);
   const { data = [] } = useQuery({ queryKey: ['users'], queryFn: () => apiGet<User[]>('/users') });
+  const { data: sessions = [] } = useQuery({
+    queryKey: ['user-sessions'],
+    queryFn: () => apiGet<Session[]>('/users/sessions'),
+    enabled: showSessions,
+    refetchInterval: showSessions ? 30_000 : false,
+  });
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['users'] });
   const onErr = (fallback: string) => (err: unknown) => {
@@ -105,17 +131,69 @@ export default function UsersPage() {
     onError: onErr('Unable to reactivate user.'),
   });
 
+  const revokeSession = useMutation({
+    mutationFn: (id: string) => apiDelete(`/users/sessions/${id}`),
+    onSuccess: () => {
+      setError(null);
+      qc.invalidateQueries({ queryKey: ['user-sessions'] });
+    },
+    onError: onErr('Unable to end session.'),
+  });
+
   return (
     <PageShell
       title="Users"
       description="Admin, manager, accounts department, and collection-agent identities for RBAC-controlled operations."
       action={
-        can('user.create') ? (
-          <Button onClick={() => setShow((v) => !v)}><Plus className="h-4 w-4" /> New User</Button>
-        ) : undefined
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowSessions((v) => !v)}>
+            <MonitorSmartphone className="h-4 w-4" /> Active Sessions
+          </Button>
+          {can('user.create') && (
+            <Button onClick={() => setShow((v) => !v)}><Plus className="h-4 w-4" /> New User</Button>
+          )}
+        </div>
       }
     >
       {error && <div className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
+
+      {showSessions && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <MonitorSmartphone className="h-5 w-5 text-primary" /> Active Sessions
+              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">{sessions.length}</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <DataTable
+              columns={['User', 'Role', 'Device', 'IP Address', 'Logged In', 'Expires', 'Action']}
+              rows={sessions.map((s) => [
+                s.full_name,
+                ROLES.find((r) => r.value === s.role_name)?.label ?? s.role_name,
+                deviceLabel(s.user_agent),
+                s.ip ?? '-',
+                dateTime(s.created_at),
+                dateTime(s.expires_at),
+                can('user.update') ? (
+                  <Button
+                    key={s.id}
+                    size="sm"
+                    variant="danger"
+                    disabled={revokeSession.isPending}
+                    onClick={() => {
+                      if (confirm(`End this session of ${s.full_name}? That device will be logged out.`)) revokeSession.mutate(s.id);
+                    }}
+                  >
+                    <XCircle className="h-4 w-4" /> End Session
+                  </Button>
+                ) : '-',
+              ])}
+              empty="No active sessions"
+            />
+          </CardContent>
+        </Card>
+      )}
 
       {show && (
         <Card>

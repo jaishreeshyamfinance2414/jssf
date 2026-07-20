@@ -10,6 +10,8 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/', requirePermission('user.view'), asyncHandler(userController.list));
+router.get('/sessions', requirePermission('user.view'), asyncHandler(userController.sessions));
+router.delete('/sessions/:sessionId', requirePermission('user.update'), requirePasskey(), asyncHandler(userController.revokeSession));
 router.post(
   '/',
   requirePermission('user.create'),

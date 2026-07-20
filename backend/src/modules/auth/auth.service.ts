@@ -187,8 +187,15 @@ export const authService = {
   },
 
   async logout(rawRefreshToken: string, actorId?: string) {
-    if (rawRefreshToken) await authRepository.revokeRefreshToken(hashRefreshToken(rawRefreshToken));
-    if (actorId) await audit({ actorId, action: 'LOGOUT', entity: 'user', entityId: actorId });
+    if (!rawRefreshToken) return;
+    const hash = hashRefreshToken(rawRefreshToken);
+    // The logout route isn't authenticated (the access token may have already
+    // expired), so resolve the user from the refresh token itself — otherwise
+    // logouts would never reach the audit log.
+    const row = await authRepository.findRefreshTokenIncludingRevoked(hash);
+    await authRepository.revokeRefreshToken(hash);
+    const userId = actorId ?? row?.user_id;
+    if (userId) await audit({ actorId: userId, action: 'LOGOUT', entity: 'user', entityId: userId });
   },
 
   /**

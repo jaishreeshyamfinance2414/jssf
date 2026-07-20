@@ -2,6 +2,7 @@ import argon2 from 'argon2';
 import { Request, Response } from 'express';
 import { created, ok } from '../../shared/http';
 import { BadRequest } from '../../shared/errors';
+import { query } from '../../db/pool';
 import { audit } from '../audit/audit.service';
 import { authRepository } from '../auth/auth.repository';
 import { userRepository } from './user.repository';
@@ -124,5 +125,39 @@ export const userController = {
       ip: req.ip,
     });
     return ok(res, { reactivated: true });
+  },
+
+  /** Active sessions (valid refresh tokens) across all users, newest first. */
+  async sessions(_req: Request, res: Response) {
+    const { rows } = await query(
+      `SELECT rt.id, rt.user_id, u.full_name, r.name AS role_name,
+              rt.ip, rt.user_agent, rt.created_at, rt.expires_at
+         FROM refresh_tokens rt
+         JOIN users u ON u.id = rt.user_id
+         JOIN roles r ON r.id = u.role_id
+        WHERE rt.revoked_at IS NULL AND rt.expires_at > now()
+        ORDER BY rt.created_at DESC`,
+    );
+    return ok(res, rows);
+  },
+
+  /** Revoke one session — that device is logged out on its next refresh. */
+  async revokeSession(req: Request, res: Response) {
+    const { rows } = await query<{ user_id: string }>(
+      `UPDATE refresh_tokens SET revoked_at = now()
+        WHERE id = $1 AND revoked_at IS NULL
+        RETURNING user_id`,
+      [req.params.sessionId],
+    );
+    if (!rows[0]) throw BadRequest('Session not found or already ended');
+    await audit({
+      actorId: req.user!.sub,
+      action: 'SESSION_REVOKE',
+      entity: 'user',
+      entityId: rows[0].user_id,
+      meta: { sessionId: req.params.sessionId },
+      ip: req.ip,
+    });
+    return ok(res, { revoked: true });
   },
 };
