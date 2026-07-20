@@ -9,6 +9,7 @@ import { compressFormImages } from '@/lib/compress-image';
 import { useAuth } from '@/lib/auth-context';
 import { date, dateTime, money } from '@/lib/format';
 import { PageShell } from '@/components/app/page-shell';
+import { Pagination } from '@/components/app/pagination';
 import { DataTable } from '@/components/app/data-table';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -30,6 +31,8 @@ const SORT_OPTIONS = [
 ] as const;
 
 type SortKey = (typeof SORT_OPTIONS)[number]['value'];
+
+const PAGE_SIZE = 25;
 
 function sortCustomers(list: Customer[], sort: SortKey): Customer[] {
   const byNum = (fn: (c: Customer) => number, dir: 1 | -1) => (a: Customer, b: Customer) => (fn(a) - fn(b)) * dir;
@@ -83,6 +86,7 @@ export default function CustomersPage() {
   const [info, setInfo] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('latest');
+  const [page, setPage] = useState(1);
   const { data: customers = [] } = useQuery({ queryKey: ['customers'], queryFn: () => apiGet<Customer[]>('/customers') });
   const { data: areas = [] } = useQuery({ queryKey: ['areas'], queryFn: () => apiGet<Area[]>('/areas') });
   // Deep-link from the global search: /customers?focus=<id> opens that customer.
@@ -206,6 +210,13 @@ export default function CustomersPage() {
       : customers,
     sort,
   );
+  const pageCount = Math.max(1, Math.ceil(visibleCustomers.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pagedCustomers = visibleCustomers.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  // Jump back to page 1 whenever the filter or sort changes.
+  useEffect(() => {
+    setPage(1);
+  }, [q, sort]);
 
   return (
     <PageShell
@@ -437,7 +448,7 @@ export default function CustomersPage() {
       </div>
       <DataTable
         columns={['File #', 'Customer', 'Mobile', 'Area', 'Active Loans', 'Created', 'Action']}
-        rows={visibleCustomers.map((c) => [
+        rows={pagedCustomers.map((c) => [
           c.file_number,
           c.full_name,
           c.mobile,
@@ -450,6 +461,7 @@ export default function CustomersPage() {
           </div>,
         ])}
       />
+      <Pagination page={currentPage} pageCount={pageCount} total={visibleCustomers.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
     </PageShell>
   );
 }

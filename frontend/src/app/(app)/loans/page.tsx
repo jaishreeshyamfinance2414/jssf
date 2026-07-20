@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/auth-context';
 import { date, dateTime, money } from '@/lib/format';
 import { DataTable } from '@/components/app/data-table';
 import { PageShell } from '@/components/app/page-shell';
+import { Pagination } from '@/components/app/pagination';
 import { StatusPill } from '@/components/app/status-pill';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -84,6 +85,8 @@ const SORT_OPTIONS = [
 
 type SortKey = (typeof SORT_OPTIONS)[number]['value'];
 
+const PAGE_SIZE = 25;
+
 // Numeric part of a loan number, so LN-9 sorts before LN-10.
 const loanNo = (l: Loan) => Number((l.loan_number.match(/\d+/g) ?? []).join('')) || 0;
 
@@ -123,6 +126,11 @@ export default function LoansPage() {
   const [closeReason, setCloseReason] = useState('');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('latest');
+  const [page, setPage] = useState(1);
+  // Customer picker in the create-loan form: type-to-search instead of a
+  // giant <select> (customer list will grow past 1000+).
+  const [customerQuery, setCustomerQuery] = useState('');
+  const [customerOpen, setCustomerOpen] = useState(false);
   const { data: loans = [] } = useQuery({ queryKey: ['loans'], queryFn: () => apiGet<Loan[]>('/loans') });
   const { data: customers = [] } = useQuery({ queryKey: ['customers'], queryFn: () => apiGet<Customer[]>('/customers') });
   // Deep-link from the global search: /loans?focus=<id> opens that loan's payment history.
@@ -147,6 +155,7 @@ export default function LoansPage() {
       setError(null);
       setShow(false);
       setForm({ customerId: '', principal: '', emiFrequency: 'daily', tenureCount: '120', emiAmount: '' });
+      setCustomerQuery('');
       qc.invalidateQueries({ queryKey: ['loans'] });
     },
     onError: (err) => {
@@ -249,6 +258,12 @@ export default function LoansPage() {
     });
   };
   const summary = history ? buildPaymentSummary(history) : null;
+  // Type-ahead matches for the customer picker (name or mobile), capped at 20.
+  const cq = customerQuery.trim().toLowerCase();
+  const customerMatches = cq
+    ? customers.filter((c) => c.full_name.toLowerCase().includes(cq) || c.mobile.includes(cq)).slice(0, 20)
+    : [];
+  const selectedCustomer = customers.find((c) => c.id === form.customerId) ?? null;
   // Search by name, mobile, EMI amount, or loan number — then sort.
   const q = search.trim().toLowerCase();
   const visibleLoans = sortLoans(
@@ -263,6 +278,13 @@ export default function LoansPage() {
       : loans,
     sort,
   );
+  const pageCount = Math.max(1, Math.ceil(visibleLoans.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pagedLoans = visibleLoans.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  // Jump back to page 1 whenever the filter or sort changes.
+  useEffect(() => {
+    setPage(1);
+  }, [q, sort]);
   return (
     <PageShell title="Loans" description="Create daily, weekly, or monthly loan applications for admin approval." action={<Button onClick={() => setShow((v) => !v)}><Plus className="h-4 w-4" /> Create Loan</Button>}>
       {error && <div className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
@@ -272,10 +294,46 @@ export default function LoansPage() {
           <CardHeader><CardTitle>New Loan Application</CardTitle></CardHeader>
           <CardContent>
             <form className="grid gap-3 lg:grid-cols-6" onSubmit={(e) => { e.preventDefault(); create.mutate(); }}>
-              <select className="h-10 rounded-md border bg-background px-3 text-sm lg:col-span-2" value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })} required>
-                <option value="">Select customer</option>
-                {customers.map((c) => <option key={c.id} value={c.id}>{c.full_name} - {c.mobile}</option>)}
-              </select>
+              <div className="relative lg:col-span-2">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className="pl-9"
+                  placeholder="Type customer name or mobile..."
+                  value={selectedCustomer && !customerOpen ? `${selectedCustomer.full_name} - ${selectedCustomer.mobile}` : customerQuery}
+                  onFocus={() => setCustomerOpen(true)}
+                  onBlur={() => setTimeout(() => setCustomerOpen(false), 150)}
+                  onChange={(e) => {
+                    setCustomerQuery(e.target.value);
+                    setCustomerOpen(true);
+                    if (form.customerId) setForm({ ...form, customerId: '' });
+                  }}
+                  required={!form.customerId}
+                />
+                {customerOpen && cq && (
+                  <div className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border bg-background shadow-md">
+                    {customerMatches.length ? (
+                      customerMatches.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setForm({ ...form, customerId: c.id });
+                            setCustomerQuery('');
+                            setCustomerOpen(false);
+                          }}
+                        >
+                          <span>{c.full_name}</span>
+                          <span className="text-xs text-muted-foreground">{c.mobile}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">No matching customer</div>
+                    )}
+                  </div>
+                )}
+              </div>
               <Input type="number" placeholder="Loan amount" value={form.principal} onChange={(e) => setForm({ ...form, principal: e.target.value })} required />
               <select className="h-10 rounded-md border bg-background px-3 text-sm" value={form.emiFrequency} onChange={(e) => setForm({ ...form, emiFrequency: e.target.value })}>
                 <option value="daily">Daily EMI</option><option value="weekly">Weekly EMI</option><option value="monthly">Monthly EMI</option>
@@ -518,7 +576,7 @@ export default function LoansPage() {
       </div>
       <DataTable
         columns={['Loan No', 'Customer', 'Principal', 'EMI', 'Frequency', 'Status', 'Date', 'Closing Date', 'Action']}
-        rows={visibleLoans.map((l) => [
+        rows={pagedLoans.map((l) => [
           l.loan_number,
           l.customer_name,
           money(l.principal),
@@ -552,6 +610,7 @@ export default function LoansPage() {
           </div>,
         ])}
       />
+      <Pagination page={currentPage} pageCount={pageCount} total={visibleLoans.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
     </PageShell>
   );
 }
