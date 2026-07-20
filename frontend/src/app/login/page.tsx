@@ -6,7 +6,8 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { AxiosError } from 'axios';
-import { Landmark, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import { Logo } from '@/components/logo';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -49,9 +50,7 @@ export default function LoginPage() {
       {/* Brand panel */}
       <div className="hidden w-1/2 flex-col justify-between bg-sidebar p-12 text-sidebar-foreground lg:flex">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-white">
-            <Landmark className="h-6 w-6" />
-          </div>
+          <Logo size={44} />
           <span className="text-xl font-bold text-white">Jai Shree Shyam Finance</span>
         </div>
         <div>
@@ -74,7 +73,7 @@ export default function LoginPage() {
         <div className="w-full max-w-sm">
           <div className="mb-8 lg:hidden">
             <div className="flex items-center gap-2 text-primary">
-              <Landmark className="h-6 w-6" />
+              <Logo size={32} />
               <span className="text-lg font-bold">JSSF</span>
             </div>
           </div>

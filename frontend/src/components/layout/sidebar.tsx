@@ -19,9 +19,9 @@ import {
   BarChart3,
   Settings,
   ScrollText,
-  Pause,
   LogOut,
 } from 'lucide-react';
+import { Logo } from '@/components/logo';
 import { cn } from '@/lib/utils';
 import { apiGet } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -136,9 +136,7 @@ export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: (
       >
         {/* Brand */}
         <div className="flex items-center gap-3 px-5 py-5">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/90 text-white shadow-sm">
-          <Pause className="h-5 w-5 fill-current" />
-        </div>
+        <Logo size={40} />
         <div className="leading-tight">
           <p className="font-serif text-[15px] font-semibold text-white">Jai Shree Shyam</p>
           <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-sidebar-foreground/70">
