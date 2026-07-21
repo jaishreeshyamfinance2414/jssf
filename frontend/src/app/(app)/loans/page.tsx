@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
 import { ArrowUpDown, CheckCircle2, Edit2, History, Pencil, Plus, Search, Trash2 } from 'lucide-react';
@@ -122,6 +122,7 @@ export default function LoansPage() {
   const [edit, setEdit] = useState<Loan | null>(null);
   const [editForm, setEditForm] = useState({ principal: '', emiFrequency: 'daily', tenureCount: '120', emiAmount: '' });
   const [historyLoan, setHistoryLoan] = useState<Loan | null>(null);
+  const historyRef = useRef<HTMLDivElement | null>(null);
   const [closingLoan, setClosingLoan] = useState<Loan | null>(null);
   const [closeReason, setCloseReason] = useState('');
   const [search, setSearch] = useState('');
@@ -142,6 +143,11 @@ export default function LoansPage() {
       window.history.replaceState(null, '', window.location.pathname);
     }
   }, [loans]);
+  // The history card renders above the loans table, so on long lists (and
+  // especially on mobile) opening it happens off-screen — scroll it into view.
+  useEffect(() => {
+    if (historyLoan) historyRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [historyLoan?.id]);
   const { data: history } = useQuery({
     queryKey: ['loan-detail', historyLoan?.id],
     queryFn: () => apiGet<LoanDetail>(`/loans/${historyLoan!.id}`),
@@ -425,6 +431,7 @@ export default function LoansPage() {
         </Card>
       )}
       {historyLoan && (
+        <div ref={historyRef} className="scroll-mt-16">
         <Card>
           <CardHeader>
             <CardTitle className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -547,6 +554,7 @@ export default function LoansPage() {
             )}
           </CardContent>
         </Card>
+        </div>
       )}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <div className="relative flex-1">
