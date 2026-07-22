@@ -9,8 +9,6 @@ export interface CreateLoanInput {
   principal: number;
   interestRate: number;
   interestAmount: number;
-  processingFeePct: number;
-  processingFee: number;
   totalPayable: number;
   emiAmount: number;
   emiFrequency: EmiFrequency;
@@ -25,7 +23,6 @@ export interface UpdateLoanTermsInput {
   principal: number;
   interestRate: number;
   interestAmount: number;
-  processingFee: number;
   totalPayable: number;
   emiAmount: number;
   emiFrequency: EmiFrequency;
@@ -55,9 +52,9 @@ export const loanRepository = {
     const { rows } = await query<{ id: string }>(
       `INSERT INTO loans(
          loan_number, customer_id, principal, interest_rate, interest_amount,
-         processing_fee_pct, processing_fee, duration_days, emi_amount, total_payable,
+         duration_days, emi_amount, total_payable,
          emi_frequency, tenure_count, sequence_no, status, created_by
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pending',$14)
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending',$12)
        RETURNING id`,
       [
         input.loanNumber,
@@ -65,8 +62,6 @@ export const loanRepository = {
         input.principal,
         input.interestRate,
         input.interestAmount,
-        input.processingFeePct,
-        input.processingFee,
         input.durationDays,
         input.emiAmount,
         input.totalPayable,
@@ -182,19 +177,17 @@ export const loanRepository = {
           SET principal = $2,
               interest_rate = $3,
               interest_amount = $4,
-              processing_fee = $5,
-              total_payable = $6,
-              emi_amount = $7,
-              emi_frequency = $8,
-              tenure_count = $9,
-              duration_days = $10
+              total_payable = $5,
+              emi_amount = $6,
+              emi_frequency = $7,
+              tenure_count = $8,
+              duration_days = $9
         WHERE id = $1`,
       [
         id,
         input.principal,
         input.interestRate,
         input.interestAmount,
-        input.processingFee,
         input.totalPayable,
         input.emiAmount,
         input.emiFrequency,

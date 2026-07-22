@@ -23,7 +23,7 @@ export const reportsRepository = {
                     WHERE collected_at::date BETWEEN $1 AND $2), 0)::text AS penalty_income,
          COALESCE((SELECT sum(principal) FROM loans
                     WHERE disbursed_at::date BETWEEN $1 AND $2), 0)::text AS disbursed,
-         COALESCE((SELECT sum(interest_amount + processing_fee) FROM loans
+         COALESCE((SELECT sum(interest_amount) FROM loans
                     WHERE disbursed_at::date BETWEEN $1 AND $2), 0)::text AS interest_booked,
          COALESCE((SELECT sum(amount) FROM expenses
                     WHERE expense_date BETWEEN $1 AND $2), 0)::text AS expenses,

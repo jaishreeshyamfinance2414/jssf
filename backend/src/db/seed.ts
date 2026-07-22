@@ -91,7 +91,6 @@ const COLLECTION_AGENTS = [
 ];
 
 const SETTINGS: Array<[string, unknown, string]> = [
-  ['processing_fee', { first_loan_pct: 5, subsequent_pct: 1 }, 'Processing fee % by loan sequence'],
   ['penalty', { per_day_pct: 0.5 }, 'Penalty % of loan principal per missed day'],
   ['loan_number', { prefix: 'JSSF', pad: 7 }, 'Loan number format'],
   ['default_interest_rate', { pct: 10 }, 'Default flat interest %'],

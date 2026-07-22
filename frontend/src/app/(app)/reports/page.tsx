@@ -234,7 +234,7 @@ export default function ReportsPage() {
           <Card>
             <CardHeader><CardTitle className="flex items-center gap-2"><BarChart3 className="h-4 w-4" /> How this is computed</CardTitle></CardHeader>
             <CardContent className="text-sm text-muted-foreground">
-              Net = interest &amp; processing fees booked on loans disbursed in the period + penalty collected − expenses − salaries.
+              Net = interest booked on loans disbursed in the period + penalty collected − expenses − salaries.
               Collections and disbursements move cash but are principal flows, not profit.
             </CardContent>
           </Card>

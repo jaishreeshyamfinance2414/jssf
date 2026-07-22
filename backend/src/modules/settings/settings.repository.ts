@@ -1,8 +1,8 @@
 import { query } from '../../db/pool';
 
 /**
- * Read-only accessor for configurable business rules (processing fee tiers,
- * penalty rate, loan number format, default interest). A full settings CRUD
+ * Read-only accessor for configurable business rules (penalty rate, loan
+ * number format, default interest). A full settings CRUD
  * UI can be added later without touching this — it's the single place every
  * module reads business-rule values from, keeping them out of application code.
  */
@@ -14,10 +14,6 @@ export const settingsRepository = {
   },
 };
 
-export interface ProcessingFeeSetting {
-  first_loan_pct: number;
-  subsequent_pct: number;
-}
 export interface PenaltySetting {
   per_day_pct: number;
 }
