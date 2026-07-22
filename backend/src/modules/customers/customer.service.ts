@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { relativeUploadPath } from '../files/upload';
-import { copyObject, deleteObject } from '../files/r2';
+import { copyObject } from '../files/r2';
 import { audit } from '../audit/audit.service';
 import { customerRepository } from './customer.repository';
 import { CreateCustomerBody, DocumentField, UpdateCustomerBody } from './customer.schema';
@@ -15,29 +15,31 @@ const filePath = (files: UploadedFiles, field: string, category: string) => {
 
 /**
  * Commit a staged document into permanent storage: copy staging/<uuid>.<ext>
- * to customers/<uuid>.<ext>, delete the staging copy, and return the new path
- * in the DB's category/filename format. Returns null when no doc was staged.
- * Keeping customers/ separate lets an R2 lifecycle rule expire only staging/.
+ * to customers/<uuid>.<ext> and return the new path in the DB's category/
+ * filename format. Returns null when no doc was staged. The staging copy is
+ * left for the R2 lifecycle rule to expire — deleting it here would add a
+ * second serial round-trip per document to the create request.
  */
 async function commitStaged(key: string | undefined): Promise<string | null> {
   if (!key) return null;
   const ext = key.slice(key.lastIndexOf('.') === -1 ? key.length : key.lastIndexOf('.'));
   const destKey = `customers/${randomUUID()}${ext}`;
   await copyObject(key, destKey);
-  await deleteObject(key); // best-effort; lifecycle rule sweeps any leftover
   return destKey;
 }
 
 export const customerService = {
   async create(body: CreateCustomerBody, actorId: string, ip?: string | null) {
-    // Commit every staged document up front. If any copy fails the whole create
-    // aborts before the DB insert, so we never persist a customer pointing at a
-    // document that isn't there.
+    // Commit every staged document up front, all copies in parallel. If any
+    // copy fails the whole create aborts before the DB insert, so we never
+    // persist a customer pointing at a document that isn't there.
     const docs = body.documents ?? {};
-    const committed = {} as Record<DocumentField, string | null>;
-    for (const field of Object.keys(docs) as DocumentField[]) {
-      committed[field] = await commitStaged(docs[field]);
-    }
+    const fields = Object.keys(docs) as DocumentField[];
+    const paths = await Promise.all(fields.map((f) => commitStaged(docs[f])));
+    const committed = Object.fromEntries(fields.map((f, i) => [f, paths[i]])) as Record<
+      DocumentField,
+      string | null
+    >;
     const doc = (field: DocumentField) => committed[field] ?? null;
 
     const customer = await customerRepository.create({
