@@ -5,7 +5,11 @@
 require('dotenv/config');
 const argon2 = require('argon2');
 const { Pool } = require('pg');
-const pool = new Pool();
+// Prefer DATABASE_URL (production .env) — node-pg's Pool() does NOT read it
+// automatically, it only reads the discrete PG* vars. Fall back to those (dev).
+const pool = new Pool(
+  process.env.DATABASE_URL ? { connectionString: process.env.DATABASE_URL } : {},
+);
 
 async function main() {
   const [email, password] = process.argv.slice(2);
