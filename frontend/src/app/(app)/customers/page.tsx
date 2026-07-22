@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
-import { ArrowUpDown, Eye, Loader2, Plus, Search, Trash2, Upload } from 'lucide-react';
+import { ArrowUpDown, Eye, Loader2, Plus, Power, PowerOff, Search, Trash2, Upload } from 'lucide-react';
 import { api, apiDelete, apiGet, fetchFileUrl } from '@/lib/api';
 import { compressFormImages, compressImageFile } from '@/lib/compress-image';
 import { useAuth } from '@/lib/auth-context';
@@ -15,8 +15,16 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 
-interface Customer { id: string; file_number: number; full_name: string; mobile: string; area_name: string | null; active_loan_count: string; created_at: string }
+interface Customer { id: string; file_number: number; full_name: string; mobile: string; area_name: string | null; active_loan_count: string; total_loan_count: string; is_active: boolean; created_at: string }
 interface Area { id: string; name: string }
+
+const STATUS_FILTERS = [
+  { value: 'active', label: 'Active Customers' },
+  { value: 'closed_loan', label: 'Closed-Loan Customers' },
+  { value: 'deactivated', label: 'Deactivated Customers' },
+  { value: 'all', label: 'All Customers' },
+] as const;
+type StatusFilter = (typeof STATUS_FILTERS)[number]['value'];
 
 const SORT_OPTIONS = [
   { value: 'latest', label: 'Latest First' },
@@ -40,13 +48,16 @@ const DOC_FIELDS = [
   ['photo', 'Photo'],
   ['aadhaarDoc', 'Aadhaar'],
   ['panDoc', 'PAN'],
-  ['signature', 'Signature'],
+  ['signature', 'Signed Cheque'],
   ['guarantorPhoto', 'Guarantor Photo'],
   ['guarantorAadhaarDoc', 'Guarantor Aadhaar'],
   ['guarantorPanDoc', 'Guarantor PAN'],
-  ['guarantorSignature', 'Guarantor Signature'],
+  ['guarantorSignature', 'Guarantor Signed Cheque'],
 ] as const;
 type DocField = (typeof DOC_FIELDS)[number][0];
+
+// Documents that are mandatory when creating a customer.
+const REQUIRED_DOCS = new Set<DocField>(['photo', 'signature']);
 
 const ACCEPT = 'image/jpeg,image/png,image/webp,application/pdf';
 
@@ -106,8 +117,12 @@ export default function CustomersPage() {
   const [info, setInfo] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('latest');
+  const [status, setStatus] = useState<StatusFilter>('active');
   const [page, setPage] = useState(1);
-  const { data: customers = [] } = useQuery({ queryKey: ['customers'], queryFn: () => apiGet<Customer[]>('/customers') });
+  const { data: customers = [] } = useQuery({
+    queryKey: ['customers', status],
+    queryFn: () => apiGet<Customer[]>(`/customers?status=${status}`),
+  });
   const { data: areas = [] } = useQuery({ queryKey: ['areas'], queryFn: () => apiGet<Area[]>('/areas') });
   // Deep-link from the global search: /customers?focus=<id> opens that customer.
   useEffect(() => {
@@ -180,8 +195,28 @@ export default function CustomersPage() {
     },
   });
 
+  const setActive = useMutation({
+    mutationFn: ({ id, activate }: { id: string; activate: boolean }) =>
+      api.post(`/customers/${id}/${activate ? 'activate' : 'deactivate'}`),
+    onSuccess: () => {
+      setError(null);
+      qc.invalidateQueries({ queryKey: ['customers'] });
+      qc.invalidateQueries({ queryKey: ['customer-detail', selectedId] });
+    },
+    onError: (err) => {
+      const ax = err as AxiosError<{ error?: { message?: string } }>;
+      setError(ax.response?.data?.error?.message ?? 'Unable to update customer status.');
+    },
+  });
+
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    // Photo and signature aren't native inputs (they're staged uploads), so
+    // enforce them here — the text/select fields are enforced natively.
+    if (!stagedDocs.photo || !stagedDocs.signature) {
+      setError('Customer photo and signature are required.');
+      return;
+    }
     // Text fields as JSON; documents were already uploaded to staging and are
     // referenced by key. The server commits the staged keys into permanent
     // storage during create.
@@ -280,10 +315,10 @@ export default function CustomersPage() {
   const pageCount = Math.max(1, Math.ceil(visibleCustomers.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
   const pagedCustomers = visibleCustomers.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  // Jump back to page 1 whenever the filter or sort changes.
+  // Jump back to page 1 whenever the filter, sort, or status changes.
   useEffect(() => {
     setPage(1);
-  }, [q, sort]);
+  }, [q, sort, status]);
 
   return (
     <PageShell
@@ -297,15 +332,15 @@ export default function CustomersPage() {
           <CardContent>
             <form onSubmit={submit} className="space-y-5">
               <div className="grid gap-3 md:grid-cols-3">
-                <Input name="fullName" placeholder="Customer full name" required />
-                <Input name="mobile" placeholder="Mobile" required />
-                <select name="areaId" className="h-10 rounded-md border bg-background px-3 text-sm">
-                  <option value="">No area</option>
+                <Input name="fullName" placeholder="Customer full name *" required />
+                <Input name="mobile" placeholder="Mobile *" required />
+                <select name="areaId" required defaultValue="" className="h-10 rounded-md border bg-background px-3 text-sm">
+                  <option value="" disabled>Select area *</option>
                   {areas.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
-                <Input name="guardianName" placeholder="Father / guardian" />
+                <Input name="guardianName" placeholder="Father / guardian *" required />
                 <Input name="altMobile" placeholder="Alternate mobile" />
-                <Input name="address" placeholder="Address" />
+                <Input name="address" placeholder="Address *" required />
                 <Input name="aadhaarNo" placeholder="Aadhaar number" />
                 <Input name="panNo" placeholder="PAN number" />
               </div>
@@ -331,12 +366,12 @@ export default function CustomersPage() {
                 <Input name="guarantorPanNo" placeholder="Guarantor PAN" />
               </div>
               <div>
-                <h4 className="mb-2 text-sm font-semibold">Documents (each uploads as soon as you attach it)</h4>
+                <h4 className="mb-2 text-sm font-semibold">Documents (each uploads as soon as you attach it) — Photo & Signature required</h4>
                 <div className="grid gap-3 md:grid-cols-4">
                   {DOC_FIELDS.map(([field, label]) => (
                     <StagedDoc
                       key={field}
-                      label={label}
+                      label={REQUIRED_DOCS.has(field) ? `${label} *` : label}
                       stagedKey={stagedDocs[field]}
                       onStaged={(key) => setStagedDocs((prev) => ({ ...prev, [field]: key }))}
                       onRemoved={(key) => {
@@ -368,17 +403,30 @@ export default function CustomersPage() {
             <CardTitle className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <span>{selected.full_name} <span className="text-sm font-normal text-muted-foreground">(File #{selected.file_number})</span></span>
               <div className="flex gap-2">
-                {can('customer.delete') && (
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={() => {
-                      if (confirm(`Delete customer ${selected.full_name}?`)) remove.mutate(selected.id);
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4" /> Delete
-                  </Button>
-                )}
+                {can('customer.delete') && (() => {
+                  const loans = selected.loans ?? [];
+                  const hasActiveLoan = loans.some((l) => l.status === 'active');
+                  if (!selected.is_active) {
+                    return (
+                      <Button variant="outline" size="sm" onClick={() => setActive.mutate({ id: selected.id, activate: true })}>
+                        <Power className="h-4 w-4" /> Activate
+                      </Button>
+                    );
+                  }
+                  if (hasActiveLoan) return null; // protected — has an active loan
+                  if (loans.length > 0) {
+                    return (
+                      <Button variant="outline" size="sm" onClick={() => { if (confirm(`Deactivate customer ${selected.full_name}?`)) setActive.mutate({ id: selected.id, activate: false }); }}>
+                        <PowerOff className="h-4 w-4" /> Deactivate
+                      </Button>
+                    );
+                  }
+                  return (
+                    <Button variant="danger" size="sm" onClick={() => { if (confirm(`Delete customer ${selected.full_name}? This permanently removes them and their documents.`)) remove.mutate(selected.id); }}>
+                      <Trash2 className="h-4 w-4" /> Delete
+                    </Button>
+                  );
+                })()}
                 {can('customer.update') && !editing && (
                   <Button type="button" variant="outline" size="sm" onClick={() => setEditing(true)}>
                     Edit
@@ -513,15 +561,24 @@ export default function CustomersPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <div className="flex items-center gap-2">
-          <ArrowUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <div className="flex gap-2">
           <select
-            className="h-10 rounded-md border bg-background px-3 text-sm"
-            value={sort}
-            onChange={(e) => setSort(e.target.value as SortKey)}
+            className="h-10 flex-1 rounded-md border bg-background px-3 text-sm sm:flex-none"
+            value={status}
+            onChange={(e) => setStatus(e.target.value as StatusFilter)}
           >
-            {SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            {STATUS_FILTERS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
+          <div className="flex flex-1 items-center gap-2 sm:flex-none">
+            <ArrowUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <select
+              className="h-10 w-full rounded-md border bg-background px-3 text-sm sm:w-auto"
+              value={sort}
+              onChange={(e) => setSort(e.target.value as SortKey)}
+            >
+              {SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
         </div>
         {q && (
           <span className="text-sm text-muted-foreground">
@@ -530,19 +587,43 @@ export default function CustomersPage() {
         )}
       </div>
       <DataTable
-        columns={['File #', 'Customer', 'Mobile', 'Area', 'Active Loans', 'Created', 'Action']}
-        rows={pagedCustomers.map((c) => [
-          c.file_number,
-          c.full_name,
-          c.mobile,
-          c.area_name ?? '-',
-          c.active_loan_count,
-          dateTime(c.created_at),
-          <div key={c.id} className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={() => { setSelectedId(c.id); setEditing(false); }}><Eye className="h-4 w-4" /> Details</Button>
-            {can('customer.delete') && <Button size="sm" variant="danger" onClick={() => { if (confirm(`Delete customer ${c.full_name}?`)) remove.mutate(c.id); }}><Trash2 className="h-4 w-4" /> Delete</Button>}
-          </div>,
-        ])}
+        columns={['File #', 'Customer', 'Mobile', 'Area', 'Active Loans', 'Status', 'Created', 'Action']}
+        rows={pagedCustomers.map((c) => {
+          const hasLoans = Number(c.total_loan_count) > 0;
+          const hasActiveLoan = Number(c.active_loan_count) > 0;
+          return [
+            c.file_number,
+            <span key={c.id} className={c.is_active ? '' : 'text-muted-foreground'}>{c.full_name}</span>,
+            c.mobile,
+            c.area_name ?? '-',
+            c.active_loan_count,
+            c.is_active
+              ? <span className="text-success">Active</span>
+              : <span className="text-muted-foreground">Deactivated</span>,
+            dateTime(c.created_at),
+            <div key={c.id} className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => { setSelectedId(c.id); setEditing(false); }}><Eye className="h-4 w-4" /> Details</Button>
+              {can('customer.delete') && (
+                !c.is_active ? (
+                  // Deactivated → allow reactivation.
+                  <Button size="sm" variant="outline" onClick={() => setActive.mutate({ id: c.id, activate: true })}>
+                    <Power className="h-4 w-4" /> Activate
+                  </Button>
+                ) : hasActiveLoan ? null : hasLoans ? (
+                  // Loan history but nothing active → deactivate (soft delete).
+                  <Button size="sm" variant="outline" onClick={() => { if (confirm(`Deactivate customer ${c.full_name}?`)) setActive.mutate({ id: c.id, activate: false }); }}>
+                    <PowerOff className="h-4 w-4" /> Deactivate
+                  </Button>
+                ) : (
+                  // Never had a loan → safe to hard delete.
+                  <Button size="sm" variant="danger" onClick={() => { if (confirm(`Delete customer ${c.full_name}? This permanently removes them and their documents.`)) remove.mutate(c.id); }}>
+                    <Trash2 className="h-4 w-4" /> Delete
+                  </Button>
+                )
+              )}
+            </div>,
+          ];
+        })}
       />
       <Pagination page={currentPage} pageCount={pageCount} total={visibleCustomers.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
     </PageShell>

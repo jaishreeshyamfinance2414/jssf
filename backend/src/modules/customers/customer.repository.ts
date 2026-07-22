@@ -155,13 +155,34 @@ export const customerRepository = {
     );
   },
 
-  async list(search?: string) {
+  /**
+   * @param status which customers to return:
+   *   'active'      — is_active = true (default)
+   *   'deactivated' — is_active = false (soft-deleted / deactivated)
+   *   'closed_loan' — active customers whose loans are ALL closed (>=1 loan,
+   *                   0 active) — the candidates for deactivation
+   *   'all'         — every customer regardless of status
+   * Rows include active_loan_count and total_loan_count so the UI can decide
+   * which of Delete / Deactivate / Activate applies to each customer.
+   */
+  async list(search?: string, status: 'active' | 'deactivated' | 'closed_loan' | 'all' = 'active') {
+    const statusFilter =
+      status === 'active'
+        ? 'c.is_active = true'
+        : status === 'deactivated'
+          ? 'c.is_active = false'
+          : status === 'closed_loan'
+            ? `c.is_active = true
+               AND EXISTS (SELECT 1 FROM loans l WHERE l.customer_id = c.id)
+               AND NOT EXISTS (SELECT 1 FROM loans l WHERE l.customer_id = c.id AND l.status = 'active')`
+            : 'true'; // 'all'
     const { rows } = await query(
       `SELECT c.id, c.file_number, c.full_name, c.mobile, c.alt_mobile, c.photo_path, c.is_active, c.created_at,
               a.name AS area_name,
-              (SELECT count(*) FROM loans l WHERE l.customer_id = c.id AND l.status = 'active') AS active_loan_count
+              (SELECT count(*) FROM loans l WHERE l.customer_id = c.id AND l.status = 'active') AS active_loan_count,
+              (SELECT count(*) FROM loans l WHERE l.customer_id = c.id) AS total_loan_count
          FROM customers c LEFT JOIN areas a ON a.id = c.area_id
-        WHERE c.is_active = true
+        WHERE ${statusFilter}
           AND ($1::text IS NULL OR c.full_name ILIKE '%'||$1||'%' OR c.mobile ILIKE '%'||$1||'%'
                OR c.file_number::text = $1)
         ORDER BY c.created_at DESC
@@ -192,9 +213,31 @@ export const customerRepository = {
     await query(`UPDATE customers SET is_active = false WHERE id = $1`, [id]);
   },
 
+  /** Flip a customer's active flag (deactivate = false, activate = true). */
+  async setActive(id: string, isActive: boolean): Promise<void> {
+    await query(`UPDATE customers SET is_active = $2 WHERE id = $1`, [id, isActive]);
+  },
+
+  /**
+   * Permanently remove a customer row. Only safe when the customer has never
+   * had a loan — loans reference customers with ON DELETE RESTRICT, and the
+   * service enforces the zero-loan rule before calling this.
+   */
+  async hardDelete(id: string): Promise<void> {
+    await query(`DELETE FROM customers WHERE id = $1`, [id]);
+  },
+
   async countLoansFor(customerId: string): Promise<number> {
     const { rows } = await query<{ c: string }>(
       `SELECT count(*)::text AS c FROM loans WHERE customer_id = $1`,
+      [customerId],
+    );
+    return Number(rows[0].c);
+  },
+
+  async countActiveLoansFor(customerId: string): Promise<number> {
+    const { rows } = await query<{ c: string }>(
+      `SELECT count(*)::text AS c FROM loans WHERE customer_id = $1 AND status = 'active'`,
       [customerId],
     );
     return Number(rows[0].c);

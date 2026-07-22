@@ -4,7 +4,7 @@ import { copyObject, deleteObject } from '../files/r2';
 import { audit } from '../audit/audit.service';
 import { customerRepository } from './customer.repository';
 import { CreateCustomerBody, DocumentField, UpdateCustomerBody } from './customer.schema';
-import { NotFound } from '../../shared/errors';
+import { Conflict, NotFound } from '../../shared/errors';
 
 type UploadedFiles = Record<string, Express.Multer.File[] | undefined>;
 
@@ -134,16 +134,91 @@ export const customerService = {
     const customer = await customerRepository.findById(id);
     if (!customer) throw NotFound('Customer not found');
 
-    await customerRepository.softDelete(id);
+    // A customer can only be deleted if they have NEVER had a loan. Any loan —
+    // active OR closed — anchors ledger, EMI and collection entries, so deleting
+    // the customer would corrupt the books. countLoansFor counts every status.
+    const loanCount = await customerRepository.countLoansFor(id);
+    if (loanCount > 0) {
+      throw Conflict(
+        'This customer has loan history and cannot be deleted. ' +
+          'Deleting them would affect active loans and financial records.',
+      );
+    }
+
+    // No loans exist, so no financial/audit dependency on the documents —
+    // permanently remove them from R2 alongside the customer row.
+    const docPaths = [
+      customer.photo_path,
+      customer.aadhaar_path,
+      customer.pan_path,
+      customer.signature_path,
+      customer.guarantor_photo_path,
+      customer.guarantor_aadhaar_path,
+      customer.guarantor_pan_path,
+      customer.guarantor_signature_path,
+    ].filter(Boolean) as string[];
+    // Best-effort: a failed R2 delete must not block removing the customer.
+    await Promise.allSettled(docPaths.map((p) => deleteObject(p)));
+
+    await customerRepository.hardDelete(id);
     await audit({
       actorId,
       action: 'DELETE',
       entity: 'customer',
       entityId: id,
-      meta: { fullName: customer.full_name, mobile: customer.mobile },
+      meta: { fullName: customer.full_name, mobile: customer.mobile, documentsDeleted: docPaths.length },
       ip,
     });
 
     return { deleted: true };
+  },
+
+  /**
+   * Deactivate (soft-delete) a customer. Allowed only when no loan is currently
+   * active — an active loan still has EMIs to collect, so the customer must stay
+   * visible/active. Documents are retained (unlike hard delete) because loan
+   * history depends on them.
+   */
+  async deactivate(id: string, actorId: string, ip?: string | null) {
+    const customer = await customerRepository.findById(id);
+    if (!customer) throw NotFound('Customer not found');
+    if (!customer.is_active) throw Conflict('Customer is already deactivated.');
+
+    const activeLoans = await customerRepository.countActiveLoansFor(id);
+    if (activeLoans > 0) {
+      throw Conflict(
+        'This customer has an active loan and cannot be deactivated. ' +
+          'Close the loan first, then deactivate.',
+      );
+    }
+
+    await customerRepository.setActive(id, false);
+    await audit({
+      actorId,
+      action: 'DEACTIVATE',
+      entity: 'customer',
+      entityId: id,
+      meta: { fullName: customer.full_name, mobile: customer.mobile },
+      ip,
+    });
+    return { deactivated: true };
+  },
+
+  /** Reactivate a previously deactivated customer. */
+  async activate(id: string, actorId: string, ip?: string | null) {
+    const customer = await customerRepository.findById(id);
+    if (!customer) throw NotFound('Customer not found');
+    if (customer.is_active) throw Conflict('Customer is already active.');
+
+    await customerRepository.setActive(id, true);
+    await audit({
+      actorId,
+      action: 'ACTIVATE',
+      entity: 'customer',
+      entityId: id,
+      meta: { fullName: customer.full_name, mobile: customer.mobile },
+      ip,
+    });
+    return { activated: true };
   },
 };

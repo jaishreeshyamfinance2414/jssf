@@ -11,7 +11,9 @@ import { deleteObject } from '../files/r2';
 export const customerController = {
   async list(req: Request, res: Response) {
     const search = typeof req.query.search === 'string' ? req.query.search : undefined;
-    return ok(res, await customerRepository.list(search));
+    const allowed = ['active', 'deactivated', 'closed_loan', 'all'] as const;
+    const status = allowed.find((s) => s === req.query.status) ?? 'active';
+    return ok(res, await customerRepository.list(search, status));
   },
 
   async detail(req: Request, res: Response) {
@@ -56,5 +58,13 @@ export const customerController = {
       payload: {},
       execute: () => customerService.delete(req.params.id, req.user!.sub, req.ip),
     });
+  },
+
+  async deactivate(req: Request, res: Response) {
+    return ok(res, await customerService.deactivate(req.params.id, req.user!.sub, req.ip));
+  },
+
+  async activate(req: Request, res: Response) {
+    return ok(res, await customerService.activate(req.params.id, req.user!.sub, req.ip));
   },
 };

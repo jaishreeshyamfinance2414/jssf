@@ -57,4 +57,18 @@ router.put(
 );
 router.delete('/:id', requirePermission('customer.delete'), requirePasskey(), asyncHandler(customerController.delete));
 
+// Deactivate (soft-delete) / activate a customer. Same privilege as delete.
+router.post(
+  '/:id/deactivate',
+  requirePermission('customer.delete'),
+  requirePasskey(),
+  asyncHandler(customerController.deactivate),
+);
+router.post(
+  '/:id/activate',
+  requirePermission('customer.delete'),
+  requirePasskey(),
+  asyncHandler(customerController.activate),
+);
+
 export default router;
