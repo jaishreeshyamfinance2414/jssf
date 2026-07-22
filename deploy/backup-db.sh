@@ -27,12 +27,12 @@ mkdir -p "$BACKUP_DIR"
 sudo -u postgres pg_dump jssf | gzip > "$FILE"
 echo "$(date -Is) wrote $FILE ($(du -h "$FILE" | cut -f1))"
 
-# uploads (customer photos / documents) — sync alongside the DB dump
-tar czf "$BACKUP_DIR/uploads_$STAMP.tar.gz" -C "$HOME/jssf/backend" uploads
+# NOTE: customer photos / documents are NOT backed up here anymore — they live
+# in Cloudflare R2 (durable, replicated object storage), not on this server.
+# Only the Postgres database (which holds the R2 object keys) is backed up.
 
 if [[ -n "$S3_BUCKET" ]]; then
   aws s3 cp "$FILE" "s3://$S3_BUCKET/db/" --only-show-errors
-  aws s3 cp "$BACKUP_DIR/uploads_$STAMP.tar.gz" "s3://$S3_BUCKET/uploads/" --only-show-errors
   echo "$(date -Is) uploaded to s3://$S3_BUCKET"
 fi
 
@@ -42,7 +42,6 @@ fi
 if [[ -n "$GDRIVE_REMOTE" ]] && command -v rclone >/dev/null \
    && rclone listremotes | grep -q "^${GDRIVE_REMOTE%%:*}:$"; then
   rclone copy "$FILE" "$GDRIVE_REMOTE/db/" --quiet
-  rclone copy "$BACKUP_DIR/uploads_$STAMP.tar.gz" "$GDRIVE_REMOTE/uploads/" --quiet
   echo "$(date -Is) uploaded to $GDRIVE_REMOTE"
   rclone delete "$GDRIVE_REMOTE" --min-age "${GDRIVE_KEEP_DAYS}d" --quiet || true
   rclone rmdirs "$GDRIVE_REMOTE" --leave-root --quiet || true

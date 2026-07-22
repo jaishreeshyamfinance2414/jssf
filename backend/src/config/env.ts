@@ -48,6 +48,17 @@ const schema = z.object({
   UPLOAD_DIR: z.string().default('./uploads'),
   MAX_UPLOAD_MB: z.coerce.number().default(5),
 
+  // ── Cloudflare R2 (S3-compatible object storage for customer documents) ──
+  // All uploaded PII (photos, Aadhaar, PAN, signatures, bills) is streamed to
+  // this private bucket instead of local disk. Endpoint is the account-level
+  // S3 API URL: https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+  R2_ENDPOINT: z.string().url(),
+  R2_BUCKET: z.string().min(1),
+  R2_ACCESS_KEY_ID: z.string().min(1),
+  R2_SECRET_ACCESS_KEY: z.string().min(1),
+  // R2 ignores region, but the S3 SDK requires one; 'auto' is the R2 convention.
+  R2_REGION: z.string().default('auto'),
+
   SEED_ADMIN_EMAIL: z.string().email().default('admin@jssf.local'),
   SEED_ADMIN_MOBILE: z.string().default('9999999999'),
   SEED_ADMIN_PASSWORD: z.string().default('Admin@123'),

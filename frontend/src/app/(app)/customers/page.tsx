@@ -3,9 +3,9 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
-import { ArrowUpDown, Eye, Plus, Search, Trash2, Upload } from 'lucide-react';
+import { ArrowUpDown, Eye, Loader2, Plus, Search, Trash2, Upload } from 'lucide-react';
 import { api, apiDelete, apiGet, fetchFileUrl } from '@/lib/api';
-import { compressFormImages } from '@/lib/compress-image';
+import { compressFormImages, compressImageFile } from '@/lib/compress-image';
 import { useAuth } from '@/lib/auth-context';
 import { date, dateTime, money } from '@/lib/format';
 import { PageShell } from '@/components/app/page-shell';
@@ -33,6 +33,22 @@ const SORT_OPTIONS = [
 type SortKey = (typeof SORT_OPTIONS)[number]['value'];
 
 const PAGE_SIZE = 25;
+
+// The eight uploadable document slots, in display order. Field names match the
+// backend (customer.schema.ts DOCUMENT_FIELDS).
+const DOC_FIELDS = [
+  ['photo', 'Photo'],
+  ['aadhaarDoc', 'Aadhaar'],
+  ['panDoc', 'PAN'],
+  ['signature', 'Signature'],
+  ['guarantorPhoto', 'Guarantor Photo'],
+  ['guarantorAadhaarDoc', 'Guarantor Aadhaar'],
+  ['guarantorPanDoc', 'Guarantor PAN'],
+  ['guarantorSignature', 'Guarantor Signature'],
+] as const;
+type DocField = (typeof DOC_FIELDS)[number][0];
+
+const ACCEPT = 'image/jpeg,image/png,image/webp,application/pdf';
 
 function sortCustomers(list: Customer[], sort: SortKey): Customer[] {
   const byNum = (fn: (c: Customer) => number, dir: 1 | -1) => (a: Customer, b: Customer) => (fn(a) - fn(b)) * dir;
@@ -79,6 +95,10 @@ export default function CustomersPage() {
   const qc = useQueryClient();
   const { can } = useAuth();
   const [show, setShow] = useState(false);
+  // Create form: field -> staged R2 key ("staging/<uuid>.<ext>"). Each document
+  // uploads the instant it's attached; these keys are committed on submit and
+  // discarded if the form is abandoned.
+  const [stagedDocs, setStagedDocs] = useState<Partial<Record<DocField, string>>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [location, setLocation] = useState({ latitude: '', longitude: '', accuracy: '', capturedAt: '', status: 'Location not captured yet' });
@@ -110,12 +130,29 @@ export default function CustomersPage() {
     if (selected) detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [selected?.id]);
   const create = useMutation({
-    mutationFn: async (form: FormData) => api.post('/customers', form),
+    mutationFn: async (payload: Record<string, unknown>) => api.post('/customers', payload),
     onSuccess: () => {
+      // Documents are already committed server-side — clear staging state so the
+      // cleanup effect doesn't delete them, then close the form.
+      setStagedDocs({});
+      setError(null);
       setShow(false);
       qc.invalidateQueries({ queryKey: ['customers'] });
     },
+    onError: (err) => {
+      const ax = err as AxiosError<{ error?: { message?: string } }>;
+      setError(ax.response?.data?.error?.message ?? 'Unable to create customer.');
+    },
   });
+
+  // Discard staged (un-committed) documents from R2. Called when the create
+  // form is abandoned — cancelled, closed, or a document is replaced/removed.
+  // Fire-and-forget; a failed cleanup is swept by the R2 staging lifecycle rule.
+  const discardStaged = (keys: string[]) => {
+    for (const key of keys) {
+      api.delete('/customers/staging', { data: { key } }).catch(() => {});
+    }
+  };
   const update = useMutation({
     mutationFn: (form: FormData) => api.put(`/customers/${selectedId}`, form),
     onSuccess: () => {
@@ -145,7 +182,24 @@ export default function CustomersPage() {
 
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    create.mutate(await compressFormImages(new FormData(e.currentTarget)));
+    // Text fields as JSON; documents were already uploaded to staging and are
+    // referenced by key. The server commits the staged keys into permanent
+    // storage during create.
+    const fd = new FormData(e.currentTarget);
+    const payload: Record<string, unknown> = {};
+    fd.forEach((value, key) => {
+      if (typeof value === 'string') payload[key] = value;
+    });
+    payload.documents = stagedDocs;
+    create.mutate(payload);
+  };
+
+  // Close the create form and discard anything staged but not yet saved.
+  const closeCreateForm = () => {
+    discardStaged(Object.values(stagedDocs).filter(Boolean) as string[]);
+    setStagedDocs({});
+    setError(null);
+    setShow(false);
   };
 
   const captureLocation = () => {
@@ -192,6 +246,19 @@ export default function CustomersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show]);
 
+  // Discard staged-but-unsaved documents if the user navigates away from the
+  // page entirely (SPA route change / component unmount) without submitting.
+  // A hard browser/tab close can't authenticate a cleanup call, so those are
+  // swept by the R2 lifecycle rule on the staging/ prefix instead.
+  const stagedRef = useRef(stagedDocs);
+  stagedRef.current = stagedDocs;
+  useEffect(() => {
+    return () => {
+      const keys = Object.values(stagedRef.current).filter(Boolean) as string[];
+      for (const key of keys) api.delete('/customers/staging', { data: { key } }).catch(() => {});
+    };
+  }, []);
+
   const submitEdit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     update.mutate(await compressFormImages(new FormData(e.currentTarget)));
@@ -222,7 +289,7 @@ export default function CustomersPage() {
     <PageShell
       title="Customers"
       description="Customer KYC, guarantor details, documents, and loan history foundation."
-      action={<Button onClick={() => setShow((v) => !v)}><Plus className="h-4 w-4" /> New Customer</Button>}
+      action={<Button onClick={() => (show ? closeCreateForm() : setShow(true))}><Plus className="h-4 w-4" /> New Customer</Button>}
     >
       {show && (
         <Card>
@@ -263,15 +330,31 @@ export default function CustomersPage() {
                 <Input name="guarantorAadhaarNo" placeholder="Guarantor Aadhaar" />
                 <Input name="guarantorPanNo" placeholder="Guarantor PAN" />
               </div>
-              <div className="grid gap-3 md:grid-cols-4">
-                {['photo', 'aadhaarDoc', 'panDoc', 'signature', 'guarantorPhoto', 'guarantorAadhaarDoc', 'guarantorPanDoc', 'guarantorSignature'].map((field) => (
-                  <label key={field} className="rounded-md border bg-muted/40 p-3 text-xs font-medium">
-                    <span className="mb-2 flex items-center gap-2"><Upload className="h-3.5 w-3.5" /> {field}</span>
-                    <input name={field} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="w-full text-xs" />
-                  </label>
-                ))}
+              <div>
+                <h4 className="mb-2 text-sm font-semibold">Documents (each uploads as soon as you attach it)</h4>
+                <div className="grid gap-3 md:grid-cols-4">
+                  {DOC_FIELDS.map(([field, label]) => (
+                    <StagedDoc
+                      key={field}
+                      label={label}
+                      stagedKey={stagedDocs[field]}
+                      onStaged={(key) => setStagedDocs((prev) => ({ ...prev, [field]: key }))}
+                      onRemoved={(key) => {
+                        discardStaged([key]);
+                        setStagedDocs((prev) => {
+                          const next = { ...prev };
+                          delete next[field];
+                          return next;
+                        });
+                      }}
+                    />
+                  ))}
+                </div>
               </div>
-              <Button disabled={create.isPending}>Save Customer</Button>
+              <div className="flex gap-2">
+                <Button disabled={create.isPending}>Save Customer</Button>
+                <Button type="button" variant="outline" onClick={closeCreateForm}>Cancel</Button>
+              </div>
             </form>
           </CardContent>
         </Card>
@@ -471,6 +554,82 @@ function Info({ label, value }: { label: string; value: string | null | undefine
     <div className="rounded-md border bg-muted/30 p-3">
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-1 text-sm font-medium">{value || '-'}</div>
+    </div>
+  );
+}
+
+/**
+ * One document slot on the create form. On file selection it compresses (images
+ * only) and uploads immediately to the staging area, showing a spinner then a
+ * preview. Remove discards the staged object. The parent holds the staging key.
+ */
+function StagedDoc({
+  label,
+  stagedKey,
+  onStaged,
+  onRemoved,
+}: {
+  label: string;
+  stagedKey: string | undefined;
+  onStaged: (key: string) => void;
+  onRemoved: (key: string) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = async (file: File) => {
+    setError(null);
+    setUploading(true);
+    try {
+      // Replacing an existing attachment — discard the previous staged object.
+      if (stagedKey) onRemoved(stagedKey);
+      const prepared = await compressImageFile(file);
+      const fd = new FormData();
+      fd.append('file', prepared);
+      const { data } = await api.post<{ data: { key: string } }>('/customers/staging', fd);
+      onStaged(data.data.key);
+      setFileName(file.name);
+    } catch (err) {
+      const ax = err as AxiosError<{ error?: { message?: string } }>;
+      setError(ax.response?.data?.error?.message ?? 'Upload failed');
+      if (inputRef.current) inputRef.current.value = '';
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const remove = () => {
+    if (stagedKey) onRemoved(stagedKey);
+    setFileName(null);
+    setError(null);
+    if (inputRef.current) inputRef.current.value = '';
+  };
+
+  return (
+    <div className="rounded-md border bg-muted/40 p-3 text-xs font-medium">
+      <span className="mb-2 flex items-center gap-2"><Upload className="h-3.5 w-3.5" /> {label}</span>
+      {stagedKey ? (
+        <div className="flex items-center justify-between gap-2 rounded border bg-background px-2 py-1.5">
+          <span className="truncate text-primary" title={fileName ?? undefined}>✓ {fileName ?? 'Uploaded'}</span>
+          <button type="button" onClick={remove} className="shrink-0 text-danger hover:underline">Remove</button>
+        </div>
+      ) : uploading ? (
+        <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading…</div>
+      ) : (
+        <input
+          ref={inputRef}
+          type="file"
+          accept={ACCEPT}
+          className="w-full text-xs"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleFile(file);
+          }}
+        />
+      )}
+      {error && <div className="mt-1 text-danger">{error}</div>}
     </div>
   );
 }

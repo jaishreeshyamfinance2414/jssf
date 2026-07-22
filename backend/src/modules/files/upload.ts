@@ -1,22 +1,20 @@
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
-import fs from 'node:fs';
-import fsp from 'node:fs/promises';
 import multer, { FileFilterCallback } from 'multer';
 import { NextFunction, Request, Response } from 'express';
 import { env } from '../../config/env';
 import { BadRequest } from '../../shared/errors';
+import { putObject } from './r2';
 
 /**
- * Multer disk storage: files land under uploads/<category>/<uuid>.<ext>. The
+ * Uploads are buffered in memory (not written to disk), verified by magic
+ * bytes, then streamed to Cloudflare R2 under "<category>/<uuid>.<ext>". The
  * category comes from the route (customers, guarantors, expenses), never from
- * user input, so path traversal via filename isn't possible.
+ * user input, so a malicious filename can't escape its prefix.
  *
  * Security: the stored extension comes from the whitelisted MIME type — the
- * client's filename (and its extension) is never trusted. After the write,
- * verifyUploadedFiles() sniffs each file's magic bytes and rejects anything
- * whose actual content doesn't match its declared type (e.g. HTML disguised
- * as image/png), deleting the offending files.
+ * client's filename is never trusted. Magic bytes are sniffed BEFORE the upload,
+ * so content that doesn't match its declared type (e.g. HTML disguised as
+ * image/png) is rejected without ever reaching R2.
  */
 const MIME_EXT: Record<string, string> = {
   'image/jpeg': '.jpg',
@@ -24,15 +22,6 @@ const MIME_EXT: Record<string, string> = {
   'image/webp': '.webp',
   'application/pdf': '.pdf',
 };
-
-function storageFor(category: string) {
-  const dir = path.join(env.UPLOAD_DIR, category);
-  fs.mkdirSync(dir, { recursive: true });
-  return multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, dir),
-    filename: (_req, file, cb) => cb(null, `${randomUUID()}${MIME_EXT[file.mimetype] ?? ''}`),
-  });
-}
 
 const fileFilter = (_req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
   if (!MIME_EXT[file.mimetype]) {
@@ -66,39 +55,46 @@ function allUploadedFiles(req: Request): Express.Multer.File[] {
 }
 
 /**
- * Post-upload content verification — mount immediately after the multer
- * middleware. Sniffs each stored file's magic bytes against its declared
- * MIME; on any mismatch every file from this request is deleted and the
- * request is rejected.
+ * Verify each buffered file's magic bytes, then upload it to R2. Mount
+ * immediately after the multer middleware, scoped to the same category.
+ *
+ * On any content mismatch the request is rejected before any upload; files
+ * already sent to R2 in this request are deleted so a rejected submission
+ * leaves nothing behind. On success each file gets `.filename` (the R2 key's
+ * basename) so relativeUploadPath() persists "<category>/<filename>" — the
+ * exact string format the DB used under local-disk storage.
  */
-export async function verifyUploadedFiles(req: Request, _res: Response, next: NextFunction) {
-  const files = allUploadedFiles(req);
-  try {
-    for (const file of files) {
-      const fd = await fsp.open(file.path, 'r');
-      const buf = Buffer.alloc(12);
-      try {
-        await fd.read(buf, 0, 12, 0);
-      } finally {
-        await fd.close();
+export const storeUploadedFiles = (category: string) =>
+  async function storeUploadedFilesMw(req: Request, _res: Response, next: NextFunction) {
+    const files = allUploadedFiles(req);
+    const uploadedKeys: string[] = [];
+    try {
+      for (const file of files) {
+        if (!magicBytesMatch(file.buffer.subarray(0, 12), file.mimetype)) {
+          throw BadRequest(`File "${file.originalname}" content does not match its declared type`);
+        }
       }
-      if (!magicBytesMatch(buf, file.mimetype)) {
-        await Promise.allSettled(files.map((f) => fsp.unlink(f.path)));
-        next(BadRequest(`File "${file.originalname}" content does not match its declared type`));
-        return;
+      // All files passed verification — now upload. Done in a second pass so a
+      // late mismatch never leaves half a submission in the bucket.
+      for (const file of files) {
+        const filename = `${randomUUID()}${MIME_EXT[file.mimetype] ?? ''}`;
+        const key = `${category}/${filename}`;
+        await putObject(key, file.buffer, file.mimetype);
+        uploadedKeys.push(key);
+        file.filename = filename;
       }
+      next();
+    } catch (err) {
+      const { deleteObject } = await import('./r2');
+      await Promise.allSettled(uploadedKeys.map((k) => deleteObject(k)));
+      next(err);
     }
-    next();
-  } catch (err) {
-    await Promise.allSettled(files.map((f) => fsp.unlink(f.path)));
-    next(err);
-  }
-}
+  };
 
-/** Build an upload middleware scoped to a category subfolder. */
-export const uploadTo = (category: string) =>
+/** Build an upload middleware scoped to a category. Files are held in memory. */
+export const uploadTo = (_category: string) =>
   multer({
-    storage: storageFor(category),
+    storage: multer.memoryStorage(),
     fileFilter,
     limits: { fileSize: env.MAX_UPLOAD_MB * 1024 * 1024 },
   });

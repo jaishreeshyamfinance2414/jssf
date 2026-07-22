@@ -6,6 +6,7 @@ import { customerService } from './customer.service';
 import { CreateCustomerBody } from './customer.schema';
 import { UpdateCustomerBody } from './customer.schema';
 import { NotFound } from '../../shared/errors';
+import { deleteObject } from '../files/r2';
 
 export const customerController = {
   async list(req: Request, res: Response) {
@@ -20,10 +21,23 @@ export const customerController = {
     return ok(res, { ...customer, loans });
   },
 
+  // A single document, uploaded and content-verified into the staging area by
+  // the middleware chain. Returns the staging key the form holds until submit.
+  async stageUpload(req: Request, res: Response) {
+    const file = req.file;
+    if (!file) throw NotFound('No file uploaded');
+    return created(res, { key: `staging/${file.filename}` });
+  },
+
+  // Discard an abandoned staged upload (form cancelled, file replaced, etc.).
+  async unstage(req: Request, res: Response) {
+    await deleteObject((req.body as { key: string }).key);
+    return ok(res, { discarded: true });
+  },
+
   async create(req: Request, res: Response) {
     const body = req.body as CreateCustomerBody;
-    const files = (req.files as Record<string, Express.Multer.File[]>) ?? {};
-    const customer = await customerService.create(body, files, req.user!.sub, req.ip);
+    const customer = await customerService.create(body, req.user!.sub, req.ip);
     return created(res, customer);
   },
 

@@ -8,6 +8,15 @@ function isCompressibleImage(file: File): boolean {
   return ['image/jpeg', 'image/png', 'image/webp'].includes(file.type);
 }
 
+/**
+ * Compress a single image file (downscale + WebP). Non-images and anything that
+ * fails to decode are returned untouched, so it's safe to call on any upload.
+ */
+export async function compressImageFile(file: File): Promise<File> {
+  if (!isCompressibleImage(file) || file.size === 0) return file;
+  return compressImage(file);
+}
+
 async function compressImage(file: File): Promise<File> {
   const bitmap = await createImageBitmap(file).catch(() => null);
   if (!bitmap) return file; // corrupt/unsupported — let the server validate

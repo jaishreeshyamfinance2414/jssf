@@ -47,7 +47,17 @@ if [[ ! -d "$APP_DIR/backend" || ! -d "$APP_DIR/frontend" ]]; then
 fi
 
 echo "==> [5/8] Backend .env"
+# Cloudflare R2 credentials — customer documents are stored in R2, so the app
+# refuses to boot without these. Export them before running this script:
+#   export R2_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+#   export R2_BUCKET=jssf-docs
+#   export R2_ACCESS_KEY_ID=...
+#   export R2_SECRET_ACCESS_KEY=...
 if [[ ! -f "$APP_DIR/backend/.env" ]]; then
+  : "${R2_ENDPOINT:?export R2_ENDPOINT before running (see comment in setup-server.sh)}"
+  : "${R2_BUCKET:?export R2_BUCKET before running}"
+  : "${R2_ACCESS_KEY_ID:?export R2_ACCESS_KEY_ID before running}"
+  : "${R2_SECRET_ACCESS_KEY:?export R2_SECRET_ACCESS_KEY before running}"
   cat > "$APP_DIR/backend/.env" <<EOF
 NODE_ENV=production
 PORT=4000
@@ -71,6 +81,12 @@ COOKIE_SECURE=true
 
 UPLOAD_DIR=./uploads
 MAX_UPLOAD_MB=5
+
+R2_ENDPOINT=${R2_ENDPOINT}
+R2_BUCKET=${R2_BUCKET}
+R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+R2_REGION=auto
 
 SEED_ADMIN_EMAIL=admin@jaishrishyamfinance.com
 SEED_ADMIN_MOBILE=9821417166
