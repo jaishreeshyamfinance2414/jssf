@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { relativeUploadPath } from '../files/upload';
-import { copyObject } from '../files/r2';
+import { copyObject, deleteObject } from '../files/r2';
 import { audit } from '../audit/audit.service';
 import { customerRepository } from './customer.repository';
 import { CreateCustomerBody, DocumentField, UpdateCustomerBody } from './customer.schema';
@@ -14,11 +14,11 @@ const filePath = (files: UploadedFiles, field: string, category: string) => {
 };
 
 /**
- * Commit a staged document into permanent storage: copy staging/<uuid>.<ext>
- * to customers/<uuid>.<ext> and return the new path in the DB's category/
- * filename format. Returns null when no doc was staged. The staging copy is
- * left for the R2 lifecycle rule to expire — deleting it here would add a
- * second serial round-trip per document to the create request.
+ * Copy a staged document into permanent storage: staging/<uuid>.<ext> ->
+ * customers/<uuid>.<ext>, returning the new path in the DB's category/filename
+ * format. Returns null when no doc was staged. Does NOT delete the staging copy
+ * — the caller removes those in one parallel best-effort batch after all copies
+ * succeed, so a failed delete can never abort a create mid-way.
  */
 async function commitStaged(key: string | undefined): Promise<string | null> {
   if (!key) return null;
@@ -30,8 +30,8 @@ async function commitStaged(key: string | undefined): Promise<string | null> {
 
 export const customerService = {
   async create(body: CreateCustomerBody, actorId: string, ip?: string | null) {
-    // Commit every staged document up front, all copies in parallel. If any
-    // copy fails the whole create aborts before the DB insert, so we never
+    // Commit every staged document up front, all copies running in parallel. If
+    // any copy fails the whole create aborts before the DB insert, so we never
     // persist a customer pointing at a document that isn't there.
     const docs = body.documents ?? {};
     const fields = Object.keys(docs) as DocumentField[];
@@ -41,6 +41,11 @@ export const customerService = {
       string | null
     >;
     const doc = (field: DocumentField) => committed[field] ?? null;
+
+    // Remove the now-redundant staging copies in one parallel, best-effort pass.
+    // allSettled means a transient delete failure can't fail the create; the R2
+    // staging/ lifecycle rule sweeps anything left behind.
+    await Promise.allSettled(fields.map((f) => (docs[f] ? deleteObject(docs[f]!) : Promise.resolve())));
 
     const customer = await customerRepository.create({
       areaId: body.areaId,
