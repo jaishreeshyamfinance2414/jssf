@@ -19,6 +19,9 @@ npm-debug.log*
 uploads/
 !uploads/.gitkeep
 
+# cloudflare origin cert + private key (never commit)
+deploy/cloudflare/
+
 # os / editor
 .DS_Store
 Thumbs.db

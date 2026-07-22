@@ -6,16 +6,15 @@
 # ~/jssf (i.e. ~/jssf/backend, ~/jssf/frontend, ~/jssf/deploy),
 # then run:
 #
-#   bash ~/jssf/deploy/setup-server.sh yourdomain.com you@email.com
+#   bash ~/jssf/deploy/setup-server.sh yourdomain.com
 #
-# Installs Node 22, PostgreSQL, nginx, pm2, certbot; creates the
-# database; builds; migrates + seeds; starts the app under pm2;
-# configures nginx + HTTPS.
+# Installs Node 22, PostgreSQL, nginx, pm2; creates the database; builds;
+# migrates + seeds; starts the app under pm2; configures nginx + HTTPS
+# using a Cloudflare Origin certificate (see step 8 below).
 # ============================================================
 set -euo pipefail
 
-DOMAIN="${1:?Usage: bash setup-server.sh <domain> <email>}"
-EMAIL="${2:?Usage: bash setup-server.sh <domain> <email>}"
+DOMAIN="${1:?Usage: bash setup-server.sh <domain>}"
 APP_DIR="$HOME/jssf"
 DB_NAME="jssf"
 DB_USER="jssf"
@@ -73,9 +72,9 @@ COOKIE_SECURE=true
 UPLOAD_DIR=./uploads
 MAX_UPLOAD_MB=5
 
-SEED_ADMIN_EMAIL=admin@jssf.local
-SEED_ADMIN_MOBILE=9999999999
-SEED_ADMIN_PASSWORD=Admin@123
+SEED_ADMIN_EMAIL=admin@jaishrishyamfinance.com
+SEED_ADMIN_MOBILE=9821417166
+SEED_ADMIN_PASSWORD=Redmi@63427258
 EOF
   echo "    backend/.env written (DB password + JWT secrets generated)"
 else
@@ -100,16 +99,32 @@ pm2 save
 # auto-start pm2 on reboot
 sudo env PATH=$PATH pm2 startup systemd -u "$USER" --hp "$HOME" >/dev/null
 
-echo "==> [8/8] nginx + HTTPS"
+echo "==> [8/8] nginx + Cloudflare Origin certificate"
+# Install the Cloudflare Origin cert. Generate it once in the Cloudflare
+# dashboard (SSL/TLS -> Origin Server -> Create Certificate) and save the two
+# PEM blocks here BEFORE running this script:
+#   $APP_DIR/deploy/cloudflare/origin.crt   (the "Origin Certificate")
+#   $APP_DIR/deploy/cloudflare/origin.key   (the "Private Key")
+# Also set the Cloudflare SSL/TLS mode to "Full (strict)".
+CF_SRC="$APP_DIR/deploy/cloudflare"
+CF_DST="/etc/ssl/cloudflare"
+if [[ ! -f "$CF_SRC/origin.crt" || ! -f "$CF_SRC/origin.key" ]]; then
+  echo "ERROR: Cloudflare Origin cert not found."
+  echo "In Cloudflare: SSL/TLS -> Origin Server -> Create Certificate, then save"
+  echo "the two PEM blocks as:"
+  echo "  $CF_SRC/origin.crt   and   $CF_SRC/origin.key"
+  exit 1
+fi
+sudo mkdir -p "$CF_DST"
+sudo cp "$CF_SRC/origin.crt" "$CF_DST/jssf.crt"
+sudo cp "$CF_SRC/origin.key" "$CF_DST/jssf.key"
+sudo chmod 600 "$CF_DST/jssf.key"
+
 sudo sed "s/YOUR_DOMAIN/${DOMAIN}/g" "$APP_DIR/deploy/nginx-jssf.conf" \
   | sudo tee /etc/nginx/sites-available/jssf >/dev/null
 sudo ln -sf /etc/nginx/sites-available/jssf /etc/nginx/sites-enabled/jssf
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl reload nginx
-
-sudo snap install --classic certbot 2>/dev/null || true
-sudo ln -sf /snap/bin/certbot /usr/bin/certbot
-sudo certbot --nginx -d "${DOMAIN}" -m "${EMAIL}" --agree-tos --no-eff-email --redirect
 
 echo ""
 echo "============================================================"
