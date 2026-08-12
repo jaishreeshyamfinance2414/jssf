@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requirePermission } from '../../middleware/auth';
+import { authenticate, requirePermission, requireRole } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
 import { collectionController } from './collection.controller';
 import { createCollectionSchema, updateCollectionSchema } from './collection.schema';
@@ -12,6 +12,7 @@ router.get('/', requirePermission('collection.view'), asyncHandler(collectionCon
 router.get('/due', requirePermission('collection.view'), asyncHandler(collectionController.due));
 router.get('/sheet', requirePermission('collection.view'), asyncHandler(collectionController.sheet));
 router.get('/sheet/agents', requirePermission('collection.view'), asyncHandler(collectionController.sheetAgents));
+router.post('/sweep', requireRole('admin'), asyncHandler(collectionController.sweep));
 router.post(
   '/',
   requirePermission('collection.create'),
