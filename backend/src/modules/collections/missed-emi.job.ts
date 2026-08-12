@@ -22,7 +22,7 @@ export async function sweepMissedEmis(): Promise<{ missedMarked: number; penaliz
          JOIN loans l ON l.id = e.loan_id AND l.status = 'active'
         WHERE e.due_date < CURRENT_DATE
           AND e.paid_amount < e.due_amount
-          AND e.status IN ('pending', 'partial')
+          AND e.status IN ('pending', 'partial', 'missed')
           AND NOT EXISTS (SELECT 1 FROM collections c WHERE c.emi_id = e.id)`,
     );
 
@@ -36,39 +36,50 @@ export async function sweepMissedEmis(): Promise<{ missedMarked: number; penaliz
           AND e.status IN ('pending', 'partial')`,
     );
 
-    // Accrue the missed-day penalty (settings.penalty.per_day_pct % of the
-    // loan principal) onto newly missed EMIs. Grace rule: the first miss of a
-    // streak is free — only the 2nd+ consecutive missed day is penalized
-    // (previous installment also missed). missed_penalty=0 keeps this
-    // once-only per EMI. The penalty is tracked on missed_penalty and the
-    // loan's total_payable only — NOT on the EMI's due_amount — so payments
-    // always count against base EMI days and the missed count stays a pure
-    // days-behind figure.
+    // Idempotent penalty recalculation: compute what each EMI's missed_penalty
+    // SHOULD be based on the current streak state (1st miss free, 2nd+
+    // consecutive miss penalized), compare with current value, update diffs,
+    // and adjust loans.total_payable by the net delta per loan.
     const penalized = await client.query(
       `WITH pen AS (
          SELECT COALESCE((value->>'per_day_pct')::numeric, 0) AS pct FROM settings WHERE key = 'penalty'
        ),
-       upd AS (
+       target AS (
+         SELECT e.id, e.loan_id, e.missed_penalty AS old_penalty,
+                CASE
+                  WHEN e.status = 'missed' AND pen.pct > 0 AND EXISTS (
+                    SELECT 1 FROM emi_schedule prev
+                     WHERE prev.loan_id = e.loan_id
+                       AND prev.installment_no = e.installment_no - 1
+                       AND prev.status = 'missed'
+                  ) THEN round(l.principal * pen.pct / 100, 2)
+                  ELSE 0
+                END AS new_penalty
+           FROM emi_schedule e
+           JOIN loans l ON l.id = e.loan_id AND l.status = 'active'
+           CROSS JOIN pen
+       ),
+       diff AS (
+         SELECT id, loan_id, old_penalty, new_penalty, (new_penalty - old_penalty) AS delta
+           FROM target
+          WHERE old_penalty <> new_penalty
+       ),
+       upd_emi AS (
          UPDATE emi_schedule e
-            SET missed_penalty = round(l.principal * pen.pct / 100, 2)
-           FROM pen, loans l
-          WHERE l.id = e.loan_id AND l.status = 'active'
-            AND e.status = 'missed' AND e.missed_penalty = 0 AND pen.pct > 0
-            AND EXISTS (
-              SELECT 1 FROM emi_schedule prev
-               WHERE prev.loan_id = e.loan_id
-                 AND prev.installment_no = e.installment_no - 1
-                 AND prev.status = 'missed'
-            )
-          RETURNING e.loan_id, e.missed_penalty
+            SET missed_penalty = d.new_penalty
+           FROM diff d
+          WHERE e.id = d.id
        ),
        by_loan AS (
-         SELECT loan_id, sum(missed_penalty) AS added FROM upd GROUP BY loan_id
+         SELECT loan_id, sum(delta) AS net_delta
+           FROM diff
+          GROUP BY loan_id
        )
        UPDATE loans l
-          SET total_payable = l.total_payable + b.added
+          SET total_payable = l.total_payable + b.net_delta
          FROM by_loan b
-        WHERE l.id = b.loan_id`,
+        WHERE l.id = b.loan_id
+       RETURNING l.id`,
     );
 
     const matured = await client.query(

@@ -105,7 +105,7 @@ export default function CollectionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showLedger, setShowLedger] = useState(false);
   const [editing, setEditing] = useState<Collection | null>(null);
-  const [editForm, setEditForm] = useState({ amount: '', penalty: '', collectedDate: '' });
+  const [editForm, setEditForm] = useState({ amount: '', penalty: '', type: 'full', collectedDate: '' });
   const [sort, setSort] = useState<SortKey>('due_date_asc');
   const { data: due = [] } = useQuery({ queryKey: ['collections', 'due'], queryFn: () => apiGet<Due[]>('/collections/due') });
   const { data: collections = [] } = useQuery({ queryKey: ['collections'], queryFn: () => apiGet<Collection[]>('/collections') });
@@ -169,6 +169,7 @@ export default function CollectionsPage() {
     setEditForm({
       amount: String(Number(c.amount)),
       penalty: String(Number(c.penalty)),
+      type: c.type,
       collectedDate: new Date(c.collected_at).toISOString().slice(0, 10),
     });
   };
@@ -358,25 +359,49 @@ export default function CollectionsPage() {
           <CardHeader><CardTitle>Edit Entry — {editing.loan_number} / {editing.customer_name}</CardTitle></CardHeader>
           <CardContent>
             <form
-              className="grid gap-3 md:grid-cols-4"
+              className="grid gap-3 md:grid-cols-5"
               onSubmit={(e) => {
                 e.preventDefault();
-                const body: Record<string, unknown> = { collectedDate: editForm.collectedDate };
-                if (editing.type !== 'missed') {
+                const body: Record<string, unknown> = {
+                  collectedDate: editForm.collectedDate,
+                  type: editForm.type,
+                };
+                if (editForm.type !== 'missed') {
                   body.amount = Number(editForm.amount);
                   body.penalty = Number(editForm.penalty || 0);
+                } else {
+                  body.amount = 0;
+                  body.penalty = 0;
                 }
                 update.mutate({ id: editing.id, body });
               }}
             >
+              <select
+                className="h-10 rounded-md border bg-background px-3 text-sm"
+                value={editForm.type}
+                onChange={(e) => {
+                  const t = e.target.value;
+                  setEditForm({
+                    ...editForm,
+                    type: t,
+                    amount: t === 'missed' ? '0' : editForm.amount === '0' ? '' : editForm.amount,
+                    penalty: t === 'missed' ? '0' : editForm.penalty,
+                  });
+                }}
+              >
+                <option value="full">Paid (Full)</option>
+                <option value="partial">Paid (Partial)</option>
+                <option value="advance">Paid (Advance)</option>
+                <option value="missed">Missed (₹0)</option>
+              </select>
               <Input
                 type="number"
                 step="0.01"
                 placeholder="Amount"
                 value={editForm.amount}
                 onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })}
-                disabled={editing.type === 'missed'}
-                required={editing.type !== 'missed'}
+                disabled={editForm.type === 'missed'}
+                required={editForm.type !== 'missed'}
               />
               <Input
                 type="number"
@@ -384,7 +409,7 @@ export default function CollectionsPage() {
                 placeholder="Penalty"
                 value={editForm.penalty}
                 onChange={(e) => setEditForm({ ...editForm, penalty: e.target.value })}
-                disabled={editing.type === 'missed'}
+                disabled={editForm.type === 'missed'}
               />
               <Input
                 type="date"

@@ -271,15 +271,16 @@ export const collectionRepository = {
   /** Admin correction — collectedAt keeps the entry's original time-of-day on a new date. */
   async updateEntry(
     id: string,
-    input: { amount: number; penalty: number; collectedAt: string | null },
+    input: { amount: number; penalty: number; type?: string; collectedAt: string | null },
     client: PoolClient,
   ) {
     await client.query(
       `UPDATE collections
           SET amount = $2, penalty = $3,
-              collected_at = COALESCE($4::timestamptz, collected_at)
+              type = COALESCE($4::payment_type, type),
+              collected_at = COALESCE($5::timestamptz, collected_at)
         WHERE id = $1`,
-      [id, input.amount, input.penalty, input.collectedAt],
+      [id, input.amount, input.penalty, input.type ?? null, input.collectedAt],
     );
   },
 

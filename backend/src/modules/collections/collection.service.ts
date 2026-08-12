@@ -157,7 +157,7 @@ export const collectionService = {
   },
 
   /**
-   * Admin correction: update an entry's amount, penalty and/or date, then
+   * Admin correction: update an entry's amount, penalty, type and/or date, then
    * rebuild everything derived from it — EMI fill/status, the cash/bank
    * ledger row, agent handover expectations, and the loan's closed state.
    */
@@ -171,14 +171,32 @@ export const collectionService = {
       if (loan.closed_by || Number(loan.waiver_amount) > 0) {
         throw BadRequest('This loan was manually closed/settled. Its collection entries cannot be edited.');
       }
-      if (collection.type === 'missed' && input.amount !== undefined) {
-        throw BadRequest('A missed entry has no amount. Delete it and record a payment instead.');
+
+      const isConvertingToMissed = collection.type !== 'missed' && input.type === 'missed';
+      const isConvertingToPaid = collection.type === 'missed' && input.type !== undefined && input.type !== 'missed';
+
+      // Block amount changes on missed entries unless changing type away from missed
+      if (collection.type === 'missed' && !isConvertingToPaid && input.amount !== undefined && input.amount > 0) {
+        throw BadRequest('A missed entry cannot have an amount. Change the type to record a payment.');
       }
 
       const oldAmount = Number(collection.amount);
       const oldPenalty = Number(collection.penalty);
-      const newAmount = input.amount ?? oldAmount;
-      const newPenalty = input.penalty ?? oldPenalty;
+
+      let newAmount = input.amount ?? oldAmount;
+      let newPenalty = input.penalty ?? oldPenalty;
+      const newType = input.type ?? collection.type;
+
+      if (isConvertingToMissed) {
+        newAmount = 0;
+        newPenalty = 0;
+      } else if (isConvertingToPaid) {
+        if (!input.amount || input.amount <= 0) {
+          throw BadRequest('Amount must be greater than 0 when converting a missed entry to a payment.');
+        }
+        newAmount = input.amount;
+        newPenalty = input.penalty ?? 0;
+      }
 
       // The edited amount must still fit in the loan's total payable.
       const totalPayable = Number(loan.total_payable);
@@ -196,24 +214,46 @@ export const collectionService = {
         collectedAt = `${input.collectedDate}T${time}`;
       }
 
-      await collectionRepository.updateEntry(id, { amount: newAmount, penalty: newPenalty, collectedAt }, client);
-      await collectionRepository.rebuildEmiState(collection.loan_id, client);
-
-      // Mirror the money change into the cash/bank ledger row (only exists
-      // for non-cash or admin-direct-cash entries — safe no-op otherwise).
-      await accountsRepository.updateBySourceRef(
-        'collection',
+      await collectionRepository.updateEntry(
         id,
-        { amount: newAmount + newPenalty, txnDate: input.collectedDate ?? null },
+        { amount: newAmount, penalty: newPenalty, type: newType, collectedAt },
         client,
       );
 
-      // Reconciled agent-cash: the handover's expected total tracked the old
-      // value — shift it by the delta (reduceExpected clamps at 0).
-      const delta = oldAmount + oldPenalty - (newAmount + newPenalty);
-      if (collection.agent_ledger_id && delta !== 0) {
-        await agentLedgerRepository.reduceExpected(collection.agent_ledger_id, delta, client);
+      // Handle ledger adjustments for type conversions & amount edits:
+      if (isConvertingToMissed) {
+        // Paid → Missed: remove cash/bank ledger posting & reduce agent handover
+        await accountsRepository.deleteBySourceRef('collection', id, client);
+        if (collection.agent_ledger_id && oldAmount + oldPenalty > 0) {
+          await agentLedgerRepository.reduceExpected(collection.agent_ledger_id, oldAmount + oldPenalty, client);
+        }
+      } else if (isConvertingToPaid) {
+        // Missed → Paid: post new credit to cash/bank
+        const account = await accountsRepository.getByType(collection.mode === 'cash' ? 'cash' : 'bank', client);
+        await ledgerService.post(client, {
+          accountId: account.id,
+          direction: 'credit',
+          amount: newAmount + newPenalty,
+          source: 'collection',
+          referenceId: id,
+          description: `Collection (type correction) for ${loan.loan_number}`,
+          createdBy: actorId,
+        });
+      } else if (collection.type !== 'missed') {
+        // Regular amount/penalty/date edit on a payment entry
+        await accountsRepository.updateBySourceRef(
+          'collection',
+          id,
+          { amount: newAmount + newPenalty, txnDate: input.collectedDate ?? null },
+          client,
+        );
+        const delta = oldAmount + oldPenalty - (newAmount + newPenalty);
+        if (collection.agent_ledger_id && delta > 0) {
+          await agentLedgerRepository.reduceExpected(collection.agent_ledger_id, delta, client);
+        }
       }
+
+      await collectionRepository.rebuildEmiState(collection.loan_id, client);
 
       // The edit may complete the loan — or reopen one that auto-closed.
       const closed = await loanRepository.markClosedIfFullyPaid(collection.loan_id, client);
@@ -229,6 +269,7 @@ export const collectionService = {
           entityId: id,
           meta: {
             loanId: collection.loan_id,
+            type: { from: collection.type, to: newType },
             amount: { from: oldAmount, to: newAmount },
             penalty: { from: oldPenalty, to: newPenalty },
             collectedDate: input.collectedDate ?? null,

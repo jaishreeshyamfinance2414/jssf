@@ -229,7 +229,7 @@ export default function LoansPage() {
     },
   });
   const [editingCollection, setEditingCollection] = useState<HistoryCollection | null>(null);
-  const [collectionForm, setCollectionForm] = useState({ amount: '', penalty: '', collectedDate: '' });
+  const [collectionForm, setCollectionForm] = useState({ amount: '', penalty: '', type: 'full', collectedDate: '' });
   const updateCollection = useMutation({
     mutationFn: (input: { id: string; body: Record<string, unknown> }) => apiPut(`/collections/${input.id}`, input.body),
     onSuccess: () => {
@@ -251,6 +251,7 @@ export default function LoansPage() {
     setCollectionForm({
       amount: String(Number(c.amount)),
       penalty: String(Number(c.penalty)),
+      type: c.type,
       collectedDate: new Date(c.collected_at).toISOString().slice(0, 10),
     });
   };
@@ -463,25 +464,49 @@ export default function LoansPage() {
                       Edit Entry — {dateTime(editingCollection.collected_at)}
                     </div>
                     <form
-                      className="grid gap-3 md:grid-cols-4"
+                      className="grid gap-3 md:grid-cols-5"
                       onSubmit={(e) => {
                         e.preventDefault();
-                        const body: Record<string, unknown> = { collectedDate: collectionForm.collectedDate };
-                        if (editingCollection.type !== 'missed') {
+                        const body: Record<string, unknown> = {
+                          collectedDate: collectionForm.collectedDate,
+                          type: collectionForm.type,
+                        };
+                        if (collectionForm.type !== 'missed') {
                           body.amount = Number(collectionForm.amount);
                           body.penalty = Number(collectionForm.penalty || 0);
+                        } else {
+                          body.amount = 0;
+                          body.penalty = 0;
                         }
                         updateCollection.mutate({ id: editingCollection.id, body });
                       }}
                     >
+                      <select
+                        className="h-10 rounded-md border bg-background px-3 text-sm"
+                        value={collectionForm.type}
+                        onChange={(e) => {
+                          const t = e.target.value;
+                          setCollectionForm({
+                            ...collectionForm,
+                            type: t,
+                            amount: t === 'missed' ? '0' : collectionForm.amount === '0' ? '' : collectionForm.amount,
+                            penalty: t === 'missed' ? '0' : collectionForm.penalty,
+                          });
+                        }}
+                      >
+                        <option value="full">Paid (Full)</option>
+                        <option value="partial">Paid (Partial)</option>
+                        <option value="advance">Paid (Advance)</option>
+                        <option value="missed">Missed (₹0)</option>
+                      </select>
                       <Input
                         type="number"
                         step="0.01"
                         placeholder="Amount"
                         value={collectionForm.amount}
                         onChange={(e) => setCollectionForm({ ...collectionForm, amount: e.target.value })}
-                        disabled={editingCollection.type === 'missed'}
-                        required={editingCollection.type !== 'missed'}
+                        disabled={collectionForm.type === 'missed'}
+                        required={collectionForm.type !== 'missed'}
                       />
                       <Input
                         type="number"
@@ -489,7 +514,7 @@ export default function LoansPage() {
                         placeholder="Penalty"
                         value={collectionForm.penalty}
                         onChange={(e) => setCollectionForm({ ...collectionForm, penalty: e.target.value })}
-                        disabled={editingCollection.type === 'missed'}
+                        disabled={collectionForm.type === 'missed'}
                       />
                       <Input
                         type="date"
