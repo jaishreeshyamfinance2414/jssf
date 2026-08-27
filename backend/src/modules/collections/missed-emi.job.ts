@@ -136,6 +136,5 @@ export function startMissedEmiJob(): NodeJS.Timeout {
   };
   void tick(); // catch up immediately on boot
   timer = setInterval(tick, SWEEP_INTERVAL_MS);
-  timer.unref(); // never keep the process alive just for the sweep
   return timer;
 }

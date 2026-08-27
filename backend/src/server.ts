@@ -27,6 +27,14 @@ async function bootstrap() {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
+// Prevent stray promise rejections or uncaught exceptions from silently killing the process.
+process.on('unhandledRejection', (reason) => {
+  logger.error({ err: reason }, 'Unhandled promise rejection');
+});
+process.on('uncaughtException', (err) => {
+  logger.error({ err }, 'Uncaught exception');
+});
+
 bootstrap().catch((err) => {
   logger.error({ err }, 'Failed to start server');
   process.exit(1);
