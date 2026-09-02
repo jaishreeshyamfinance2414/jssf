@@ -32,6 +32,7 @@ interface SheetRow {
   today_mode: string | null;
   today_amount: string | null;
   today_at: string | null;
+  total_penalty: string;
 }
 
 interface AgentTotal { agent_id: string; agent_name: string; collected: string; cash: string; bank: string; entries: number }

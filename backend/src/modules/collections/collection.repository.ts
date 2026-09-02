@@ -56,6 +56,8 @@ export const collectionRepository = {
               (SELECT max(m.due_date) FROM emi_schedule m WHERE m.loan_id = l.id)::text AS closing_date,
               (SELECT min(m.due_date) FROM emi_schedule m
                 WHERE m.loan_id = l.id AND m.paid_amount < m.due_amount)::text AS next_due_date,
+              (SELECT COALESCE(sum(m.missed_penalty), 0) FROM emi_schedule m
+                WHERE m.loan_id = l.id)::text AS total_penalty,
               t.today_type, t.today_mode, t.today_amount, t.today_at
          FROM loans l
          JOIN customers c ON c.id = l.customer_id
