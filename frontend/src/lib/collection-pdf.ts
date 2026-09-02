@@ -26,42 +26,64 @@ const daysComp = (r: PdfRow) => Math.max(0, Math.floor((now() - sod(r.start_date
 const daysRem = (r: PdfRow) =>
   r.closing_date ? Math.max(0, Math.ceil((sod(r.closing_date) - now()) / DAY_MS)) : '';
 
+function drawHeader(doc: jsPDF, pw: number) {
+  // ── Dark green banner ──
+  doc.setFillColor(21, 101, 52);           // dark green
+  doc.rect(0, 0, pw, 24, 'F');
+
+  // ── Bottom wave (dark green flowing into white) ──
+  doc.setFillColor(21, 101, 52);
+  doc.lines(
+    [[pw * 0.35, 8, pw * 0.65, -4, pw, 2], [0, 6], [-pw, 0]],
+    0, 22, [1, 1], 'F', true,
+  );
+
+  // ── Light green accent wave ──
+  doc.setFillColor(34, 197, 94);
+  doc.lines(
+    [[pw * 0.3, 6, pw * 0.7, -3, pw, 1.5], [0, 2], [-pw, 0]],
+    0, 23, [1, 1], 'F', true,
+  );
+
+  // ── Thin bright green edge ──
+  doc.setFillColor(74, 222, 128);
+  doc.lines(
+    [[pw * 0.25, 5, pw * 0.75, -2, pw, 1], [0, 1], [-pw, 0]],
+    0, 25, [1, 1], 'F', true,
+  );
+
+  // ── Title text ──
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.setTextColor(255, 255, 255);
+  doc.text('JAI SHRI SHYAM FINANCE', pw / 2, 15, { align: 'center' });
+}
+
 export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pw = 210;
-  const mx = 5; // margin x
+  const mx = 5;
 
-  // ── Modern Header ──
-  // Dark navy background
-  doc.setFillColor(15, 23, 42);
-  doc.rect(0, 0, pw, 16, 'F');
-  // Gold accent line
-  doc.setFillColor(234, 179, 8);
-  doc.rect(0, 16, pw, 1.2, 'F');
-  // Title text
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.setTextColor(234, 179, 8);
-  doc.text('JAI SHRI SHYAM FINANCE', pw / 2, 10.5, { align: 'center' });
+  drawHeader(doc, pw);
 
-  // Date line
-  doc.setFontSize(7);
+  // Date
+  doc.setFontSize(10);
   doc.setTextColor(0, 0, 0);
   doc.setFont('helvetica', 'bold');
-  doc.text('Date', mx, 22);
+  doc.text('Date', mx, 36);
   doc.setFont('helvetica', 'normal');
-  doc.text(dateStr, mx + 12, 22);
+  doc.text(dateStr, mx + 14, 36);
 
   const headers = [
-    'S.No.', 'Name', 'Amount\nGiven', 'Per Day\nEmi', 'Tut', 'Today\nBal.',
+    'S.No.', 'Name', 'Amt\nGiven', 'Per Day\nEmi', 'Tut', 'Today\nBal.',
     'Mobile No.', 'Days\nComp.', 'Days\nRem.', 'Start\nDate', 'Closing\nDate',
-    'Loan\nAmt', 'Received', 'Balance', 'Penalty\nAdded',
+    'Loan\nAmt', 'Received', 'Balance', 'Penalty',
   ];
 
   const body = rows.map((r, i) => [
     i + 1,
     r.customer_name,
-    '',               // Amount Given - empty box
+    '',               // Amount Given - empty
     n(r.emi_amount),
     r.missed_count || '',
     n(r.due_till_today),
@@ -71,20 +93,23 @@ export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
     d(r.start_date),
     d(r.closing_date),
     n(r.principal),
-    n(r.received),    // shows 0 when 0
+    n(r.received),    // shows 0
     n(r.remaining),
     n(r.total_penalty) || '',
   ]);
 
+  const fs = 8; // ~12pt Word Calibri prints similarly to 8pt PDF helvetica (PDF points are larger)
+
   autoTable(doc, {
-    startY: 24,
+    startY: 39,
     head: [headers],
     body,
     styles: {
-      fontSize: 5,
-      cellPadding: 0.5,
+      font: 'helvetica',
+      fontSize: fs,
+      cellPadding: 1,
       lineColor: [0, 0, 0],
-      lineWidth: 0.1,
+      lineWidth: 0.15,
       textColor: [0, 0, 0],
       overflow: 'linebreak',
     },
@@ -93,8 +118,8 @@ export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
       textColor: [255, 255, 255],
       fontStyle: 'bold',
       halign: 'center',
-      fontSize: 5,
-      cellPadding: 0.7,
+      fontSize: 7,
+      cellPadding: 1.2,
     },
     alternateRowStyles: { fillColor: false },
     columnStyles: {
@@ -115,6 +140,12 @@ export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
     theme: 'grid',
     margin: { left: mx, right: mx },
     tableWidth: 'auto',
+    didDrawPage(data) {
+      // Redraw header on every page
+      if (data.pageNumber > 1) {
+        drawHeader(doc, pw);
+      }
+    },
     didParseCell(data) {
       if (data.section !== 'body') return;
       if (data.column.index === 4 && Number(data.cell.raw) > 0) {
