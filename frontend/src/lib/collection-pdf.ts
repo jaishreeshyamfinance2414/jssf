@@ -26,53 +26,32 @@ const daysComp = (r: PdfRow) => Math.max(0, Math.floor((now() - sod(r.start_date
 const daysRem = (r: PdfRow) =>
   r.closing_date ? Math.max(0, Math.ceil((sod(r.closing_date) - now()) / DAY_MS)) : '';
 
-function drawHeader(doc: jsPDF, pw: number) {
-  // ── Dark green banner ──
-  doc.setFillColor(21, 101, 52);           // dark green
-  doc.rect(0, 0, pw, 24, 'F');
-
-  // ── Bottom wave (dark green flowing into white) ──
-  doc.setFillColor(21, 101, 52);
-  doc.lines(
-    [[pw * 0.35, 8, pw * 0.65, -4, pw, 2], [0, 6], [-pw, 0]],
-    0, 22, [1, 1], 'F', true,
-  );
-
-  // ── Light green accent wave ──
-  doc.setFillColor(34, 197, 94);
-  doc.lines(
-    [[pw * 0.3, 6, pw * 0.7, -3, pw, 1.5], [0, 2], [-pw, 0]],
-    0, 23, [1, 1], 'F', true,
-  );
-
-  // ── Thin bright green edge ──
-  doc.setFillColor(74, 222, 128);
-  doc.lines(
-    [[pw * 0.25, 5, pw * 0.75, -2, pw, 1], [0, 1], [-pw, 0]],
-    0, 25, [1, 1], 'F', true,
-  );
-
-  // ── Title text ──
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(18);
-  doc.setTextColor(255, 255, 255);
-  doc.text('JAI SHRI SHYAM FINANCE', pw / 2, 15, { align: 'center' });
-}
-
 export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pw = 210;
   const mx = 5;
+  const tableW = pw - mx * 2; // table width = page minus margins
 
-  drawHeader(doc, pw);
+  // ── Header: Yellow rounded box, black outline, red text ──
+  const boxH = 16;
+  const boxY = 4;
+  doc.setFillColor(255, 255, 0);
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(0.6);
+  doc.roundedRect(mx, boxY, tableW, boxH, 3, 3, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(20); // ~25pt Word equivalent
+  doc.setTextColor(255, 0, 0);
+  doc.text('JAI SHRI SHYAM FINANCE', pw / 2, boxY + boxH / 2 + 1, { align: 'center', baseline: 'middle' });
 
   // Date
   doc.setFontSize(10);
   doc.setTextColor(0, 0, 0);
   doc.setFont('helvetica', 'bold');
-  doc.text('Date', mx, 36);
+  doc.text('Date', mx, boxY + boxH + 8);
   doc.setFont('helvetica', 'normal');
-  doc.text(dateStr, mx + 14, 36);
+  doc.text(dateStr, mx + 14, boxY + boxH + 8);
 
   const headers = [
     'S.No.', 'Name', 'Amt\nGiven', 'Per Day\nEmi', 'Tut', 'Today\nBal.',
@@ -83,7 +62,7 @@ export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
   const body = rows.map((r, i) => [
     i + 1,
     r.customer_name,
-    '',               // Amount Given - empty
+    '',
     n(r.emi_amount),
     r.missed_count || '',
     n(r.due_till_today),
@@ -93,20 +72,18 @@ export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
     d(r.start_date),
     d(r.closing_date),
     n(r.principal),
-    n(r.received),    // shows 0
+    n(r.received),
     n(r.remaining),
     n(r.total_penalty) || '',
   ]);
 
-  const fs = 8; // ~12pt Word Calibri prints similarly to 8pt PDF helvetica (PDF points are larger)
-
   autoTable(doc, {
-    startY: 39,
+    startY: boxY + boxH + 11,
     head: [headers],
     body,
     styles: {
       font: 'helvetica',
-      fontSize: fs,
+      fontSize: 8,
       cellPadding: 1,
       lineColor: [0, 0, 0],
       lineWidth: 0.15,
@@ -140,20 +117,11 @@ export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
     theme: 'grid',
     margin: { left: mx, right: mx },
     tableWidth: 'auto',
-    didDrawPage(data) {
-      // Redraw header on every page
-      if (data.pageNumber > 1) {
-        drawHeader(doc, pw);
-      }
-    },
     didParseCell(data) {
       if (data.section !== 'body') return;
-      if (data.column.index === 4 && Number(data.cell.raw) > 0) {
+      // Highlight Tut column only when missed >= 5
+      if (data.column.index === 4 && Number(data.cell.raw) >= 5) {
         data.cell.styles.fillColor = [220, 50, 50];
-        data.cell.styles.textColor = [255, 255, 255];
-      }
-      if (data.column.index === 5 && Number(data.cell.raw) > 0) {
-        data.cell.styles.fillColor = [22, 163, 74];
         data.cell.styles.textColor = [255, 255, 255];
       }
     },
