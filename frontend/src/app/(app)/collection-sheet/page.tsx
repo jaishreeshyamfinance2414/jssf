@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowUpDown, CheckCircle2, Clock, History, MapPin, Phone, Users } from 'lucide-react';
+import { ArrowUpDown, CheckCircle2, Clock, Download, History, MapPin, Phone, Users } from 'lucide-react';
+import { downloadCollectionPdf } from '@/lib/collection-pdf';
 import { apiGet } from '@/lib/api';
 import { date, money } from '@/lib/format';
 import { PageShell } from '@/components/app/page-shell';
@@ -111,6 +112,8 @@ const COLUMNS = [
 export default function CollectionSheetPage() {
   const [sort, setSort] = useState<SortKey>('pending_first');
   const [area, setArea] = useState('all');
+  const [showPdfModal, setShowPdfModal] = useState(false);
+  const [pdfDate, setPdfDate] = useState(() => new Date().toISOString().slice(0, 10));
   const { data: rows = [] } = useQuery({
     queryKey: ['collection-sheet'],
     queryFn: () => apiGet<SheetRow[]>('/collections/sheet'),
@@ -174,7 +177,45 @@ export default function CollectionSheetPage() {
             {visible.length} of {rows.length} loans
           </span>
         )}
+        <button
+          onClick={() => setShowPdfModal(true)}
+          className="ml-auto inline-flex h-10 items-center gap-1.5 rounded-md border bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+        >
+          <Download className="h-4 w-4" /> Download PDF
+        </button>
       </div>
+      {showPdfModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowPdfModal(false)}>
+          <div className="rounded-lg border bg-card p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
+            <h3 className="mb-4 text-lg font-semibold">Select Collection Date</h3>
+            <input
+              type="date"
+              className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+              value={pdfDate}
+              onChange={(e) => setPdfDate(e.target.value)}
+            />
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => {
+                  const d = new Date(pdfDate);
+                  const formatted = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+                  downloadCollectionPdf(visible, formatted);
+                  setShowPdfModal(false);
+                }}
+                className="flex-1 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                Download
+              </button>
+              <button
+                onClick={() => setShowPdfModal(false)}
+                className="flex-1 rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Always a horizontally swipeable table — no stacked-card view on mobile,
           so agents scan the sheet like a physical register. */}
       {visible.length ? (
