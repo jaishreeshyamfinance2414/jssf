@@ -33,8 +33,8 @@ export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
   const tableW = pw - mx * 2; // table width = page minus margins
 
   // ── Header: Yellow rounded box, black outline, red text ──
-  const boxH = 16;
-  const boxY = 4;
+  const boxH = 10;
+  const boxY = 2;
   doc.setFillColor(255, 255, 0);
   doc.setDrawColor(0, 0, 0);
   doc.setLineWidth(0.6);
@@ -43,15 +43,15 @@ export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(20); // ~25pt Word equivalent
   doc.setTextColor(255, 0, 0);
-  doc.text('JAI SHRI SHYAM FINANCE', pw / 2, boxY + boxH / 2 + 1, { align: 'center', baseline: 'middle' });
+  doc.text('JAI SHRI SHYAM FINANCE', pw / 2, boxY + boxH / 2, { align: 'center', baseline: 'middle' });
 
   // Date
   doc.setFontSize(10);
   doc.setTextColor(0, 0, 0);
   doc.setFont('helvetica', 'bold');
-  doc.text('Date', mx, boxY + boxH + 8);
+  doc.text('Date', mx, boxY + boxH + 5);
   doc.setFont('helvetica', 'normal');
-  doc.text(dateStr, mx + 14, boxY + boxH + 8);
+  doc.text(dateStr, mx + 14, boxY + boxH + 5);
 
   const headers = [
     'S.No.', 'Name', 'Amt\nGiven', 'Per Day\nEmi', 'Tut', 'Today\nBal.',
@@ -78,7 +78,7 @@ export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
   ]);
 
   autoTable(doc, {
-    startY: boxY + boxH + 11,
+    startY: boxY + boxH + 7,
     head: [headers],
     body,
     styles: {
@@ -105,10 +105,10 @@ export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
       3:  { halign: 'right' },
       4:  { halign: 'right' },
       5:  { halign: 'right' },
-      7:  { halign: 'center' },
-      8:  { halign: 'center' },
-      9:  { halign: 'center' },
-      10: { halign: 'center' },
+      7:  { halign: 'right' },
+      8:  { halign: 'right' },
+      9:  { halign: 'right' },
+      10: { halign: 'right' },
       11: { halign: 'right' },
       12: { halign: 'right' },
       13: { halign: 'right' },
