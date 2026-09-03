@@ -49,6 +49,7 @@ const DOC_FIELDS = [
   ['aadhaarDoc', 'Aadhaar'],
   ['panDoc', 'PAN'],
   ['signature', 'Signed Cheque'],
+  ['electricityBill', 'Electricity Bill'],
   ['guarantorPhoto', 'Guarantor Photo'],
   ['guarantorAadhaarDoc', 'Guarantor Aadhaar'],
   ['guarantorPanDoc', 'Guarantor PAN'],
@@ -95,6 +96,9 @@ interface CustomerDetail extends Customer {
   guarantor_pan_no: string | null;
   guarantor_pan_path: string | null;
   guarantor_signature_path: string | null;
+  work: string | null;
+  home_type: string | null;
+  electricity_bill_path: string | null;
   latitude: string | null;
   longitude: string | null;
   location_accuracy: string | null;
@@ -343,6 +347,12 @@ export default function CustomersPage() {
                 <Input name="address" placeholder="Address *" required />
                 <Input name="aadhaarNo" placeholder="Aadhaar number" />
                 <Input name="panNo" placeholder="PAN number" />
+                <Input name="work" placeholder="Work / Occupation" />
+                <select name="homeType" defaultValue="" className="h-10 rounded-md border bg-background px-3 text-sm">
+                  <option value="">Home type</option>
+                  <option value="Owned">Owned</option>
+                  <option value="Rented">Rented</option>
+                </select>
               </div>
               <input type="hidden" name="latitude" value={location.latitude} />
               <input type="hidden" name="longitude" value={location.longitude} />
@@ -447,6 +457,8 @@ export default function CustomersPage() {
               <Info label="Created" value={dateTime(selected.created_at)} />
               <Info label="Aadhaar" value={selected.aadhaar_no} />
               <Info label="PAN" value={selected.pan_no} />
+              <Info label="Work" value={selected.work} />
+              <Info label="Home Type" value={selected.home_type} />
               <Info label="Latitude" value={selected.latitude} />
               <Info label="Longitude" value={selected.longitude} />
               <Info label="Location Accuracy" value={selected.location_accuracy ? `${selected.location_accuracy} m` : null} />
@@ -478,6 +490,12 @@ export default function CustomersPage() {
                       <Input name="address" defaultValue={selected.address ?? ''} placeholder="Address" />
                       <Input name="aadhaarNo" defaultValue={selected.aadhaar_no ?? ''} placeholder="Aadhaar number" />
                       <Input name="panNo" defaultValue={selected.pan_no ?? ''} placeholder="PAN number" />
+                      <Input name="work" defaultValue={selected.work ?? ''} placeholder="Work / Occupation" />
+                      <select name="homeType" defaultValue={selected.home_type ?? ''} className="h-10 rounded-md border bg-background px-3 text-sm">
+                        <option value="">Home type</option>
+                        <option value="Owned">Owned</option>
+                        <option value="Rented">Rented</option>
+                      </select>
                       <Input name="latitude" defaultValue={selected.latitude ?? ''} placeholder="Latitude" />
                       <Input name="longitude" defaultValue={selected.longitude ?? ''} placeholder="Longitude" />
                     </div>
@@ -501,6 +519,7 @@ export default function CustomersPage() {
                           ['guarantorAadhaarDoc', 'Guarantor Aadhaar', selected.guarantor_aadhaar_path],
                           ['guarantorPanDoc', 'Guarantor PAN', selected.guarantor_pan_path],
                           ['guarantorSignature', 'Guarantor Signature', selected.guarantor_signature_path],
+                          ['electricityBill', 'Electricity Bill', selected.electricity_bill_path],
                         ] as const).map(([field, label, path]) => (
                           <div key={field} className="space-y-2">
                             <Doc label={label} path={path} />
@@ -540,6 +559,7 @@ export default function CustomersPage() {
                 <Doc label="Guarantor Aadhaar" path={selected.guarantor_aadhaar_path} />
                 <Doc label="Guarantor PAN" path={selected.guarantor_pan_path} />
                 <Doc label="Guarantor Signature" path={selected.guarantor_signature_path} />
+                <Doc label="Electricity Bill" path={selected.electricity_bill_path} />
               </div>
             </div>
             <DataTable

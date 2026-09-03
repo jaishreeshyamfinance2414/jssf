@@ -14,6 +14,7 @@ export const DOCUMENT_FIELDS = [
   'guarantorAadhaarDoc',
   'guarantorPanDoc',
   'guarantorSignature',
+  'electricityBill',
 ] as const;
 export type DocumentField = (typeof DOCUMENT_FIELDS)[number];
 
@@ -36,6 +37,7 @@ const documentsSchema = z.object({
   guarantorAadhaarDoc: stagingKeySchema.optional(),
   guarantorPanDoc: stagingKeySchema.optional(),
   guarantorSignature: stagingKeySchema.optional(),
+  electricityBill: stagingKeySchema.optional(),
 });
 
 // Base shape with lenient (optional/nullable) fields — used as-is by the Edit
@@ -57,6 +59,8 @@ const baseCustomerSchema = z.object({
   longitude: z.preprocess(emptyToNull, z.coerce.number().min(-180).max(180).nullable()),
   locationAccuracy: z.preprocess(emptyToNull, z.coerce.number().min(0).nullable()),
   locationCapturedAt: z.preprocess(emptyToNull, z.string().nullable()),
+  work: z.preprocess(emptyToNull, z.string().nullable()),
+  homeType: z.preprocess(emptyToNull, z.string().nullable()),
 });
 
 // Create: Name, Mobile, Area, Father, Address, Photo and Signature are all

@@ -72,6 +72,9 @@ export const customerService = {
       longitude: body.longitude,
       locationAccuracy: body.locationAccuracy,
       locationCapturedAt: body.locationCapturedAt,
+      electricityBillPath: doc('electricityBill'),
+      work: body.work,
+      homeType: body.homeType,
       createdBy: actorId,
     });
 
@@ -116,6 +119,9 @@ export const customerService = {
       longitude: body.longitude,
       locationAccuracy: body.locationAccuracy,
       locationCapturedAt: body.locationCapturedAt,
+      electricityBillPath: filePath(files, 'electricityBill', 'customers'),
+      work: body.work,
+      homeType: body.homeType,
     });
 
     await audit({
@@ -156,6 +162,7 @@ export const customerService = {
       customer.guarantor_aadhaar_path,
       customer.guarantor_pan_path,
       customer.guarantor_signature_path,
+      customer.electricity_bill_path,
     ].filter(Boolean) as string[];
     // Best-effort: a failed R2 delete must not block removing the customer.
     await Promise.allSettled(docPaths.map((p) => deleteObject(p)));

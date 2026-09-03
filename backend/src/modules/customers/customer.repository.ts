@@ -25,6 +25,9 @@ export interface CreateCustomerInput {
   longitude: number | null;
   locationAccuracy: number | null;
   locationCapturedAt: string | null;
+  work: string | null;
+  homeType: string | null;
+  electricityBillPath: string | null;
   createdBy: string;
 }
 
@@ -53,6 +56,9 @@ export interface UpdateCustomerInput {
   longitude?: number | null;
   locationAccuracy?: number | null;
   locationCapturedAt?: string | null;
+  work?: string | null;
+  homeType?: string | null;
+  electricityBillPath?: string | null;
 }
 
 export const customerRepository = {
@@ -63,8 +69,8 @@ export const customerRepository = {
          photo_path, aadhaar_no, aadhaar_path, pan_no, pan_path, signature_path,
          guarantor_name, guarantor_mobile, guarantor_photo_path,
          guarantor_aadhaar_no, guarantor_aadhaar_path, guarantor_pan_no, guarantor_pan_path,
-         guarantor_signature_path, latitude, longitude, location_accuracy, location_captured_at, created_by
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+         guarantor_signature_path, latitude, longitude, location_accuracy, location_captured_at, work, home_type, electricity_bill_path, created_by
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
        RETURNING id, file_number`,
       [
         input.areaId,
@@ -91,6 +97,9 @@ export const customerRepository = {
         input.longitude,
         input.locationAccuracy,
         input.locationCapturedAt,
+        input.work,
+        input.homeType,
+        input.electricityBillPath,
         input.createdBy,
       ],
     );
@@ -123,7 +132,10 @@ export const customerRepository = {
               latitude = $22,
               longitude = $23,
               location_accuracy = $24,
-              location_captured_at = $25
+              location_captured_at = $25,
+              work = $26,
+              home_type = $27,
+              electricity_bill_path = COALESCE($28, electricity_bill_path)
         WHERE id = $1`,
       [
         id,
@@ -151,6 +163,9 @@ export const customerRepository = {
         input.longitude ?? null,
         input.locationAccuracy ?? null,
         input.locationCapturedAt ?? null,
+        input.work ?? null,
+        input.homeType ?? null,
+        input.electricityBillPath ?? null,
       ],
     );
   },
