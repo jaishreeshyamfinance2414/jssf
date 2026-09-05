@@ -13,6 +13,7 @@ interface SheetRow {
   loan_id: string;
   loan_number: string;
   customer_name: string;
+  customer_work: string | null;
   customer_mobile: string;
   area_name: string | null;
   principal: string;
@@ -243,7 +244,7 @@ export default function CollectionSheetPage() {
                       <td className="sticky left-0 z-10 max-w-[180px] bg-card px-4 py-3 align-top shadow-[2px_0_4px_-2px_rgba(0,0,0,0.15)]">
                         {/* tel: link — tapping opens the phone dialer with the number ready */}
                         <a href={`tel:${r.customer_mobile}`} className="block active:opacity-70">
-                          <div className="font-medium text-primary underline-offset-2 hover:underline">{r.customer_name}</div>
+                          <div className="font-medium text-primary underline-offset-2 hover:underline">{r.customer_name}{r.customer_work ? ` (${r.customer_work})` : ''}</div>
                           <div className="flex items-center gap-1 text-xs text-muted-foreground">
                             <Phone className="h-3 w-3" /> {r.customer_mobile}
                           </div>

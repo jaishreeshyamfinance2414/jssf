@@ -3,6 +3,7 @@ import autoTable from 'jspdf-autotable';
 
 interface PdfRow {
   customer_name: string;
+  customer_work: string | null;
   customer_mobile: string;
   emi_amount: string;
   missed_count: number;
@@ -25,6 +26,24 @@ const now = () => sod(new Date().toISOString());
 const daysComp = (r: PdfRow) => Math.max(0, Math.floor((now() - sod(r.start_date)) / DAY_MS));
 const daysRem = (r: PdfRow) =>
   r.closing_date ? Math.max(0, Math.ceil((sod(r.closing_date) - now()) / DAY_MS)) : '';
+
+/** Format "Name (Work)" for PDF, truncating progressively if > 25 chars. */
+function formatNameWork(name: string, work: string | null | undefined): string {
+  if (!work) return name;
+  const full = `${name} (${work})`;
+  if (full.length <= 25) return full;
+  // Try: full name + first letter of work
+  const shortWork = `${name} (${work[0]})`;
+  if (shortWork.length <= 25) return shortWork;
+  // Try: first 2 words of name + first letter of work (only if 2+ words)
+  const words = name.split(/\s+/);
+  if (words.length >= 2) {
+    const two = `${words[0]} ${words[1]} (${work[0]})`;
+    if (two.length <= 25) return two;
+  }
+  // Fallback: first word of name + first letter of work
+  return `${words[0]} (${work[0]})`;
+}
 
 export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -61,7 +80,7 @@ export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
 
   const body = rows.map((r, i) => [
     i + 1,
-    r.customer_name,
+    formatNameWork(r.customer_name, r.customer_work),
     '',
     n(r.emi_amount),
     r.missed_count || '',
@@ -83,7 +102,7 @@ export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
     body,
     styles: {
       font: 'helvetica',
-      fontSize: 8,
+      fontSize: 9,
       cellPadding: 1,
       lineColor: [0, 0, 0],
       lineWidth: 0.15,

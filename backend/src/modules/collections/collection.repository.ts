@@ -37,6 +37,7 @@ export const collectionRepository = {
       `SELECT l.id AS loan_id, l.loan_number, l.principal, l.total_payable, l.emi_amount,
               l.emi_frequency, l.loan_date::text AS start_date,
               c.full_name AS customer_name, c.mobile AS customer_mobile,
+              c.work AS customer_work,
               a.name AS area_name,
               (SELECT count(*) FROM emi_schedule m
                 WHERE m.loan_id = l.id AND m.due_date <= CURRENT_DATE
