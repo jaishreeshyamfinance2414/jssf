@@ -107,7 +107,7 @@ export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
       minCellHeight: 9,
     },
     headStyles: {
-      fillColor: [220, 38, 38],
+      fillColor: [34, 139, 34],
       textColor: [255, 255, 255],
       fontStyle: 'bold',
       halign: 'center',
