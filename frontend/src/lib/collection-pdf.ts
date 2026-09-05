@@ -17,8 +17,14 @@ interface PdfRow {
 }
 
 const n = (v: string | number | null | undefined) => Math.round(Number(v ?? 0));
-const d = (v: string | null | undefined) =>
-  v ? new Date(v).toLocaleDateString('en-IN') : '';
+const d = (v: string | null | undefined) => {
+  if (!v) return '';
+  const dt = new Date(v);
+  const dd = String(dt.getDate()).padStart(2, '0');
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const yy = String(dt.getFullYear()).slice(-2);
+  return `${dd}/${mm}/${yy}`;
+};
 
 const DAY_MS = 86_400_000;
 const sod = (v: string) => { const x = new Date(v); x.setHours(0, 0, 0, 0); return x.getTime(); };
@@ -115,11 +121,11 @@ export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
     columnStyles: {
       0:  { halign: 'center', cellWidth: 9 },
       1:  { cellWidth: 28, overflow: 'linebreak' },
-      2:  { halign: 'right', cellWidth: 18 },
+      2:  { halign: 'right', cellWidth: 15 },
       3:  { halign: 'right', overflow: 'visible' },
       4:  { halign: 'right', overflow: 'visible' },
       5:  { halign: 'right', overflow: 'visible' },
-      6:  { overflow: 'visible', cellWidth: 18 },
+      6:  { overflow: 'visible', cellWidth: 21 },
       7:  { halign: 'right', cellWidth: 10, overflow: 'visible' },
       8:  { halign: 'right', cellWidth: 10, overflow: 'visible' },
       9:  { halign: 'right', overflow: 'visible', cellWidth: 15 },
