@@ -61,8 +61,8 @@ export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
   doc.text(dateStr, mx + 14, boxY + boxH + 5);
 
   const headers = [
-    'S.No.', 'Name', 'Amt\nGiven', 'Per Day\nEmi', 'Tut', 'Today\nBal.',
-    'Mobile No.', 'Days\nComp.', 'Days\nRem.', 'Start\nDate', 'Closing\nDate',
+    'S.No.', 'Name', 'Amount\nGiven', 'EMI', 'Tut', 'Today\nBal.',
+    'Mobile No.', 'Spent', 'Left', 'Start\nDate', 'Closing\nDate',
     'Loan\nAmt', 'Received', 'Balance', 'Penalty',
   ];
 
@@ -108,12 +108,13 @@ export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
     alternateRowStyles: { fillColor: false },
     columnStyles: {
       0:  { halign: 'center' },
+      1:  { cellWidth: 28 },
       2:  { halign: 'right', cellWidth: 18 },
       3:  { halign: 'right' },
       4:  { halign: 'right' },
       5:  { halign: 'right' },
-      7:  { halign: 'right' },
-      8:  { halign: 'right' },
+      7:  { halign: 'right', cellWidth: 10 },
+      8:  { halign: 'right', cellWidth: 10 },
       9:  { halign: 'right' },
       10: { halign: 'right' },
       11: { halign: 'right' },
