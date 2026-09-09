@@ -18,6 +18,7 @@ export interface CreateLoanInput {
   loanNumber: string;
   loanDate: string;
   createdBy: string;
+  createdAt?: string;
 }
 
 export interface UpdateLoanTermsInput {
@@ -49,15 +50,14 @@ export const loanRepository = {
     return rows[0].last_no;
   },
 
-  async create(input: CreateLoanInput) {
-    const { rows } = await query<{ id: string }>(
-      `INSERT INTO loans(
+  async create(input: CreateLoanInput, client?: PoolClient) {
+    const sql = `INSERT INTO loans(
          loan_number, customer_id, principal, interest_rate, interest_amount,
          duration_days, emi_amount, total_payable,
-         emi_frequency, tenure_count, sequence_no, status, loan_date, created_by
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending',$12,$13)
-       RETURNING id`,
-      [
+         emi_frequency, tenure_count, sequence_no, status, loan_date, created_by, created_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending',$12,$13, COALESCE($14::timestamptz, now()))
+       RETURNING id`;
+    const params = [
         input.loanNumber,
         input.customerId,
         input.principal,
@@ -71,8 +71,11 @@ export const loanRepository = {
         input.sequenceNo,
         input.loanDate,
         input.createdBy,
-      ],
-    );
+        input.createdAt ?? null,
+    ];
+    const { rows } = client
+      ? await client.query<{ id: string }>(sql, params)
+      : await query<{ id: string }>(sql, params);
     return rows[0];
   },
 
@@ -158,10 +161,10 @@ export const loanRepository = {
     return rows;
   },
 
-  async approve(id: string, approvedBy: string, client: PoolClient) {
+  async approve(id: string, approvedBy: string, client: PoolClient, approvedAt?: string) {
     await client.query(
-      `UPDATE loans SET status = 'approved', approved_by = $2, approved_at = now() WHERE id = $1`,
-      [id, approvedBy],
+      `UPDATE loans SET status = 'approved', approved_by = $2, approved_at = COALESCE($3::timestamptz, now()) WHERE id = $1`,
+      [id, approvedBy, approvedAt ?? null],
     );
   },
 
@@ -266,13 +269,14 @@ export const loanRepository = {
     loanDate: string,
     durationDays: number,
     client: PoolClient,
+    disbursedAt?: string,
   ) {
     await client.query(
       `UPDATE loans
-          SET status = 'active', disbursed_mode = $2, disbursed_at = now(), disbursed_by = $3,
+          SET status = 'active', disbursed_mode = $2, disbursed_at = COALESCE($6::timestamptz, now()), disbursed_by = $3,
               loan_date = $4, duration_days = $5
         WHERE id = $1`,
-      [id, mode, disbursedBy, loanDate, durationDays],
+      [id, mode, disbursedBy, loanDate, durationDays, disbursedAt ?? null],
     );
   },
 

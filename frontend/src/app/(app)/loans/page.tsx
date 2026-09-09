@@ -118,7 +118,7 @@ export default function LoansPage() {
   const [show, setShow] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
-  const [form, setForm] = useState({ customerId: '', principal: '', emiFrequency: 'daily', tenureCount: '120', emiAmount: '', loanDate: new Date().toISOString().slice(0, 10) });
+  const [form, setForm] = useState({ customerId: '', principal: '', emiFrequency: 'daily', tenureCount: '120', emiAmount: '', loanDate: new Date().toISOString().slice(0, 10), disbursedMode: 'cash' as string });
   const [edit, setEdit] = useState<Loan | null>(null);
   const [editForm, setEditForm] = useState({ principal: '', emiFrequency: 'daily', tenureCount: '120', emiAmount: '' });
   const [historyLoan, setHistoryLoan] = useState<Loan | null>(null);
@@ -156,13 +156,18 @@ export default function LoansPage() {
   const totalReturn = Number(form.emiAmount || 0) * Number(form.tenureCount || 0);
   const editTotalReturn = Number(editForm.emiAmount || 0) * Number(editForm.tenureCount || 0);
   const create = useMutation({
-    mutationFn: () => apiPost('/loans', { ...form, principal: Number(form.principal), tenureCount: Number(form.tenureCount), emiAmount: Number(form.emiAmount), loanDate: form.loanDate }),
+    mutationFn: () => {
+      const isBackDated = form.loanDate < new Date().toISOString().slice(0, 10);
+      return apiPost('/loans', { ...form, principal: Number(form.principal), tenureCount: Number(form.tenureCount), emiAmount: Number(form.emiAmount), loanDate: form.loanDate, ...(isBackDated ? { disbursedMode: form.disbursedMode } : {}) });
+    },
     onSuccess: () => {
       setError(null);
       setShow(false);
-      setForm({ customerId: '', principal: '', emiFrequency: 'daily', tenureCount: '120', emiAmount: '', loanDate: new Date().toISOString().slice(0, 10) });
+      setForm({ customerId: '', principal: '', emiFrequency: 'daily', tenureCount: '120', emiAmount: '', loanDate: new Date().toISOString().slice(0, 10), disbursedMode: 'cash' });
       setCustomerQuery('');
       qc.invalidateQueries({ queryKey: ['loans'] });
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-summary'] });
     },
     onError: (err) => {
       const ax = err as AxiosError<{ error?: { message?: string } }>;
@@ -357,6 +362,19 @@ export default function LoansPage() {
                   disabled={user?.role !== 'admin'}
                 />
               </div>
+              {form.loanDate < new Date().toISOString().slice(0, 10) && (
+                <>
+                  <div>
+                    <label className="mb-1 block text-xs text-muted-foreground">Disbursement Mode</label>
+                    <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={form.disbursedMode} onChange={(e) => setForm({ ...form, disbursedMode: e.target.value })}>
+                      <option value="cash">Cash</option><option value="upi">UPI</option><option value="bank_transfer">Bank Transfer</option>
+                    </select>
+                  </div>
+                  <div className="rounded-md border border-yellow-300 bg-yellow-50 px-3 py-2 text-xs text-yellow-800 dark:border-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-200 lg:col-span-6">
+                    ⚡ Back-dated loan — will be auto-approved &amp; disbursed with all dates set to {form.loanDate}
+                  </div>
+                </>
+              )}
               <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm lg:col-span-6">
                 Customer will return: <span className="font-semibold">{money(totalReturn)}</span>
                 {Number(form.principal) > 0 && <> | Profit: <span className="font-semibold">{money(totalReturn - Number(form.principal || 0))}</span></>}

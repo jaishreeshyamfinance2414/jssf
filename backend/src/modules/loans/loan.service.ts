@@ -31,6 +31,13 @@ export const loanService = {
       throw BadRequest('Loan date cannot be in the future.');
     }
 
+    const isBackDated = loanDate < today;
+
+    // Back-dated loans require a disbursement mode since they auto-activate.
+    if (isBackDated && !input.disbursedMode) {
+      throw BadRequest('Disbursement mode is required for back-dated loans.');
+    }
+
     const numberSetting = await settingsRepository.get<LoanNumberSetting>('loan_number');
 
     const sequenceNo = (await customerRepository.countLoansFor(input.customerId)) + 1;
@@ -43,7 +50,81 @@ export const loanService = {
     const year = new Date().getFullYear();
     const next = await loanRepository.nextSequenceNo(year);
     const loanNumber = `${numberSetting.prefix}-${year}-${String(next).padStart(numberSetting.pad, '0')}`;
+    const durationDays = durationFor(input.emiFrequency, input.tenureCount);
 
+    if (isBackDated) {
+      // Back-dated loan: create → approve → disburse in one atomic transaction
+      // with all timestamps (created_at, approved_at, disbursed_at) set to the loan date.
+      const backDateTs = `${loanDate}T12:00:00`;
+      const mode = input.disbursedMode!;
+
+      const loanId = await withTransaction(async (client) => {
+        const loan = await loanRepository.create({
+          customerId: input.customerId,
+          principal: input.principal,
+          interestRate,
+          interestAmount,
+          totalPayable,
+          emiAmount: input.emiAmount,
+          emiFrequency: input.emiFrequency,
+          tenureCount: input.tenureCount,
+          durationDays,
+          sequenceNo,
+          loanNumber,
+          loanDate,
+          createdBy: actorId,
+          createdAt: backDateTs,
+        }, client);
+
+        // Auto-approve with back-dated timestamp
+        const account = await accountsRepository.getByType(mode === 'cash' ? 'cash' : 'bank', client);
+        const availableBalance = await accountsRepository.totalAvailableBalance(client);
+        if (availableBalance < input.principal) {
+          throw BadRequest(
+            `Cannot auto-approve this loan. Available business funds are ₹${availableBalance.toFixed(2)}, ` +
+              `but this loan needs ₹${input.principal.toFixed(2)}. ` +
+              'Add more capital or wait for EMI collections.',
+          );
+        }
+        await loanRepository.approve(loan.id, actorId, client, backDateTs);
+
+        // Auto-disburse with back-dated timestamp
+        await ledgerService.post(client, {
+          accountId: account.id,
+          direction: 'debit',
+          amount: input.principal,
+          source: 'loan_disbursement',
+          referenceId: loan.id,
+          description: `Loan disbursed ${loanNumber} (back-dated)`,
+          createdBy: actorId,
+          txnDate: loanDate,
+        });
+        await loanRepository.markDisbursed(loan.id, mode, actorId, loanDate, durationDays, client, backDateTs);
+        await loanRepository.generateSchedule(
+          loan.id,
+          loanDate,
+          input.emiFrequency,
+          input.tenureCount,
+          totalPayable,
+          client,
+        );
+
+        await audit({
+          actorId,
+          action: 'CREATE',
+          entity: 'loan',
+          entityId: loan.id,
+          meta: { loanNumber, principal: input.principal, emiAmount: input.emiAmount, tenureCount: input.tenureCount, totalPayable, frequency: input.emiFrequency, loanDate, backDated: true, disbursedMode: mode },
+          ip,
+        }, client);
+
+        return loan.id;
+      });
+
+      return loanRepository.findById(loanId);
+    }
+
+    // Normal (today) flow — just create with pending status.
     const loan = await loanRepository.create({
       customerId: input.customerId,
       principal: input.principal,
@@ -53,7 +134,7 @@ export const loanService = {
       emiAmount: input.emiAmount,
       emiFrequency: input.emiFrequency,
       tenureCount: input.tenureCount,
-      durationDays: durationFor(input.emiFrequency, input.tenureCount),
+      durationDays,
       sequenceNo,
       loanNumber,
       loanDate,

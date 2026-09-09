@@ -7,6 +7,7 @@ export const createLoanSchema = z.object({
   tenureCount: z.coerce.number().int().positive().default(100),
   emiAmount: z.coerce.number().positive(),
   loanDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
+  disbursedMode: z.enum(['cash', 'upi', 'bank_transfer']).optional(),
 });
 
 export const updateLoanSchema = z.object({

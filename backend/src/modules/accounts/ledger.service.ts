@@ -19,6 +19,7 @@ interface PostEntryInput {
   referenceId?: string | null;
   description?: string | null;
   createdBy?: string | null;
+  txnDate?: string | null;
 }
 
 /**
@@ -47,8 +48,8 @@ export const ledgerService = {
     }
 
     await client.query(
-      `INSERT INTO account_transactions(account_id, direction, amount, source, reference_id, description, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      `INSERT INTO account_transactions(account_id, direction, amount, source, reference_id, description, created_by, txn_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7, COALESCE($8::date, CURRENT_DATE))`,
       [
         input.accountId,
         input.direction,
@@ -57,6 +58,7 @@ export const ledgerService = {
         input.referenceId ?? null,
         input.description ?? null,
         input.createdBy ?? null,
+        input.txnDate ?? null,
       ],
     );
 
