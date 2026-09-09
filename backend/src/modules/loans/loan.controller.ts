@@ -25,7 +25,7 @@ export const loanController = {
   },
 
   async create(req: Request, res: Response) {
-    return created(res, await loanService.create(req.body, req.user!.sub, req.ip));
+    return created(res, await loanService.create(req.body, req.user!.sub, req.user!.role, req.ip));
   },
 
   async update(req: Request, res: Response) {

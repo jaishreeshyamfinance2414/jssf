@@ -114,11 +114,11 @@ function sortLoans(list: Loan[], sort: SortKey): Loan[] {
 
 export default function LoansPage() {
   const qc = useQueryClient();
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const [show, setShow] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
-  const [form, setForm] = useState({ customerId: '', principal: '', emiFrequency: 'daily', tenureCount: '120', emiAmount: '' });
+  const [form, setForm] = useState({ customerId: '', principal: '', emiFrequency: 'daily', tenureCount: '120', emiAmount: '', loanDate: new Date().toISOString().slice(0, 10) });
   const [edit, setEdit] = useState<Loan | null>(null);
   const [editForm, setEditForm] = useState({ principal: '', emiFrequency: 'daily', tenureCount: '120', emiAmount: '' });
   const [historyLoan, setHistoryLoan] = useState<Loan | null>(null);
@@ -156,11 +156,11 @@ export default function LoansPage() {
   const totalReturn = Number(form.emiAmount || 0) * Number(form.tenureCount || 0);
   const editTotalReturn = Number(editForm.emiAmount || 0) * Number(editForm.tenureCount || 0);
   const create = useMutation({
-    mutationFn: () => apiPost('/loans', { ...form, principal: Number(form.principal), tenureCount: Number(form.tenureCount), emiAmount: Number(form.emiAmount) }),
+    mutationFn: () => apiPost('/loans', { ...form, principal: Number(form.principal), tenureCount: Number(form.tenureCount), emiAmount: Number(form.emiAmount), loanDate: form.loanDate }),
     onSuccess: () => {
       setError(null);
       setShow(false);
-      setForm({ customerId: '', principal: '', emiFrequency: 'daily', tenureCount: '120', emiAmount: '' });
+      setForm({ customerId: '', principal: '', emiFrequency: 'daily', tenureCount: '120', emiAmount: '', loanDate: new Date().toISOString().slice(0, 10) });
       setCustomerQuery('');
       qc.invalidateQueries({ queryKey: ['loans'] });
     },
@@ -347,6 +347,16 @@ export default function LoansPage() {
               </select>
               <Input type="number" placeholder={form.emiFrequency === 'daily' ? 'Total days / EMIs' : 'Total EMIs'} value={form.tenureCount} onChange={(e) => setForm({ ...form, tenureCount: e.target.value })} required />
               <Input type="number" placeholder={form.emiFrequency === 'daily' ? 'Per day EMI amount' : 'Per EMI amount'} value={form.emiAmount} onChange={(e) => setForm({ ...form, emiAmount: e.target.value })} required />
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Loan Date</label>
+                <Input
+                  type="date"
+                  value={form.loanDate}
+                  max={new Date().toISOString().slice(0, 10)}
+                  onChange={(e) => setForm({ ...form, loanDate: e.target.value })}
+                  disabled={user?.role !== 'admin'}
+                />
+              </div>
               <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm lg:col-span-6">
                 Customer will return: <span className="font-semibold">{money(totalReturn)}</span>
                 {Number(form.principal) > 0 && <> | Profit: <span className="font-semibold">{money(totalReturn - Number(form.principal || 0))}</span></>}

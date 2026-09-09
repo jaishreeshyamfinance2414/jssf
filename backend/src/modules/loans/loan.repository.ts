@@ -16,6 +16,7 @@ export interface CreateLoanInput {
   durationDays: number;
   sequenceNo: number;
   loanNumber: string;
+  loanDate: string;
   createdBy: string;
 }
 
@@ -53,8 +54,8 @@ export const loanRepository = {
       `INSERT INTO loans(
          loan_number, customer_id, principal, interest_rate, interest_amount,
          duration_days, emi_amount, total_payable,
-         emi_frequency, tenure_count, sequence_no, status, created_by
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending',$12)
+         emi_frequency, tenure_count, sequence_no, status, loan_date, created_by
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending',$12,$13)
        RETURNING id`,
       [
         input.loanNumber,
@@ -68,6 +69,7 @@ export const loanRepository = {
         input.emiFrequency,
         input.tenureCount,
         input.sequenceNo,
+        input.loanDate,
         input.createdBy,
       ],
     );

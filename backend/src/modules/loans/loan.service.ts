@@ -17,9 +17,19 @@ const durationFor = (frequency: CreateLoanBody['emiFrequency'], tenure: number) 
 };
 
 export const loanService = {
-  async create(input: CreateLoanBody, actorId: string, ip?: string | null) {
+  async create(input: CreateLoanBody, actorId: string, actorRole: string, ip?: string | null) {
     const customer = await customerRepository.findById(input.customerId);
     if (!customer) throw NotFound('Customer not found');
+
+    // Back-dated loan: only admins may set a past date.
+    const today = new Date().toISOString().slice(0, 10);
+    const loanDate = input.loanDate ?? today;
+    if (loanDate < today && actorRole !== 'admin') {
+      throw BadRequest('Only admins can create loans with a past date.');
+    }
+    if (loanDate > today) {
+      throw BadRequest('Loan date cannot be in the future.');
+    }
 
     const numberSetting = await settingsRepository.get<LoanNumberSetting>('loan_number');
 
@@ -46,6 +56,7 @@ export const loanService = {
       durationDays: durationFor(input.emiFrequency, input.tenureCount),
       sequenceNo,
       loanNumber,
+      loanDate,
       createdBy: actorId,
     });
 
@@ -54,7 +65,7 @@ export const loanService = {
       action: 'CREATE',
       entity: 'loan',
       entityId: loan.id,
-      meta: { loanNumber, principal: input.principal, emiAmount: input.emiAmount, tenureCount: input.tenureCount, totalPayable, frequency: input.emiFrequency },
+      meta: { loanNumber, principal: input.principal, emiAmount: input.emiAmount, tenureCount: input.tenureCount, totalPayable, frequency: input.emiFrequency, loanDate },
       ip,
     });
 
