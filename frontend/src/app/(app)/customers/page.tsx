@@ -78,6 +78,14 @@ function sortCustomers(list: Customer[], sort: SortKey): Customer[] {
     default: return sorted;
   }
 }
+
+/** Format an ISO timestamp for a datetime-local input without shifting wall time. */
+function toDateTimeLocal(value: string): string {
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return '';
+  const local = new Date(timestamp.getTime() - timestamp.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
 interface CustomerDetail extends Customer {
   guardian_name: string | null;
   alt_mobile: string | null;
@@ -108,7 +116,7 @@ interface CustomerDetail extends Customer {
 
 export default function CustomersPage() {
   const qc = useQueryClient();
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const [show, setShow] = useState(false);
   // Create form: field -> staged R2 key ("staging/<uuid>.<ext>"). Each document
   // uploads the instant it's attached; these keys are committed on submit and
@@ -300,7 +308,19 @@ export default function CustomersPage() {
 
   const submitEdit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    update.mutate(await compressFormImages(new FormData(e.currentTarget)));
+    const form = await compressFormImages(new FormData(e.currentTarget));
+    const createdAt = form.get('createdAt');
+    if (typeof createdAt === 'string') {
+      // Do not rewrite the timestamp (and lose seconds) during unrelated edits.
+      // When changed, convert the browser-local wall time to an explicit UTC ISO
+      // value so PostgreSQL never has to guess the timezone.
+      if (createdAt === toDateTimeLocal(selected!.created_at)) {
+        form.delete('createdAt');
+      } else {
+        form.set('createdAt', new Date(createdAt).toISOString());
+      }
+    }
+    update.mutate(form);
   };
 
   // Search by name, mobile, file number, or area — then sort.
@@ -498,6 +518,18 @@ export default function CustomersPage() {
                       </select>
                       <Input name="latitude" defaultValue={selected.latitude ?? ''} placeholder="Latitude" />
                       <Input name="longitude" defaultValue={selected.longitude ?? ''} placeholder="Longitude" />
+                      {user?.role === 'admin' && (
+                        <label className="space-y-1 text-xs font-medium text-muted-foreground">
+                          Created date & time
+                          <Input
+                            name="createdAt"
+                            type="datetime-local"
+                            defaultValue={toDateTimeLocal(selected.created_at)}
+                            max={toDateTimeLocal(new Date().toISOString())}
+                            required
+                          />
+                        </label>
+                      )}
                     </div>
                     <input type="hidden" name="locationAccuracy" defaultValue={selected.location_accuracy ?? ''} />
                     <input type="hidden" name="locationCapturedAt" defaultValue={selected.location_captured_at ?? ''} />

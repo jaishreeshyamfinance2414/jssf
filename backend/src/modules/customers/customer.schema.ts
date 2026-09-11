@@ -75,7 +75,18 @@ export type CreateCustomerBody = z.infer<typeof createCustomerSchema>;
 
 // Edit form still uploads via multipart; it never sends the documents map, and
 // keeps the lenient base rules so blank fields mean "leave unchanged".
-export const updateCustomerSchema = baseCustomerSchema.partial();
+// createdAt is sent only when an admin actually changes the Created field. The
+// controller additionally enforces the admin-only rule; validation here keeps
+// malformed or future timestamps out of the database.
+export const updateCustomerSchema = baseCustomerSchema.partial().extend({
+  createdAt: z
+    .string()
+    .datetime({ offset: true })
+    .refine((value) => new Date(value).getTime() <= Date.now() + 60_000, {
+      message: 'Created date cannot be in the future',
+    })
+    .optional(),
+});
 export type UpdateCustomerBody = z.infer<typeof updateCustomerSchema>;
 
 // Body for DELETE /customers/staging — discard an abandoned staged upload.

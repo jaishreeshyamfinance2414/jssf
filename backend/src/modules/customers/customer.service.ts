@@ -122,6 +122,7 @@ export const customerService = {
       electricityBillPath: filePath(files, 'electricityBill', 'customers'),
       work: body.work,
       homeType: body.homeType,
+      createdAt: body.createdAt,
     });
 
     await audit({
@@ -129,7 +130,12 @@ export const customerService = {
       action: 'UPDATE',
       entity: 'customer',
       entityId: id,
-      meta: body,
+      meta: {
+        ...body,
+        ...(body.createdAt
+          ? { createdAt: { from: existing.created_at, to: body.createdAt } }
+          : {}),
+      },
       ip,
     });
 

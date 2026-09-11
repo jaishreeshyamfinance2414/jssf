@@ -5,7 +5,7 @@ import { customerRepository } from './customer.repository';
 import { customerService } from './customer.service';
 import { CreateCustomerBody } from './customer.schema';
 import { UpdateCustomerBody } from './customer.schema';
-import { NotFound } from '../../shared/errors';
+import { Forbidden, NotFound } from '../../shared/errors';
 import { deleteObject } from '../files/r2';
 
 export const customerController = {
@@ -45,6 +45,9 @@ export const customerController = {
 
   async update(req: Request, res: Response) {
     const body = req.body as UpdateCustomerBody;
+    if (body.createdAt !== undefined && req.user!.role !== 'admin') {
+      throw Forbidden('Only an admin can change the customer Created date');
+    }
     const files = (req.files as Record<string, Express.Multer.File[]>) ?? {};
     const customer = await customerService.update(req.params.id, body, files, req.user!.sub, req.ip);
     return ok(res, customer);

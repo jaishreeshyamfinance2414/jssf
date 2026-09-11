@@ -59,6 +59,7 @@ export interface UpdateCustomerInput {
   work?: string | null;
   homeType?: string | null;
   electricityBillPath?: string | null;
+  createdAt?: string;
 }
 
 export const customerRepository = {
@@ -135,7 +136,8 @@ export const customerRepository = {
               location_captured_at = $25,
               work = $26,
               home_type = $27,
-              electricity_bill_path = COALESCE($28, electricity_bill_path)
+              electricity_bill_path = COALESCE($28, electricity_bill_path),
+              created_at = COALESCE($29::timestamptz, created_at)
         WHERE id = $1`,
       [
         id,
@@ -166,6 +168,7 @@ export const customerRepository = {
         input.work ?? null,
         input.homeType ?? null,
         input.electricityBillPath ?? null,
+        input.createdAt ?? null,
       ],
     );
   },
