@@ -108,13 +108,45 @@ When it finishes: **https://yourdomain.com** is live (through Cloudflare).
 3. Set up nightly database backups (finance data — do not skip):
    ```bash
    crontab -e
-   # add this line:
-   17 2 * * * /home/ubuntu/jssf/deploy/backup-db.sh >> /home/ubuntu/backups/backup.log 2>&1
+   # add these lines:
+   HOME=/home/ubuntu
+   PATH=/usr/local/bin:/usr/bin:/bin
+   17 2 * * * /usr/bin/bash /home/ubuntu/jssf/deploy/backup-db.sh >> /home/ubuntu/backups/backup.log 2>&1
    ```
    For off-server copies, either create a private S3 bucket + IAM role with
-   `s3:PutObject` and set `S3_BUCKET`, or configure an rclone `gdrive` remote,
-   in `deploy/backup-db.sh`. Customer documents are **not** in this backup —
-   they live in R2, which is already durable, replicated storage.
+   `s3:PutObject` and set `S3_BUCKET`, configure an rclone `gdrive` remote, or
+   configure the environment-only Backblaze B2 destination below. The existing
+   Google Drive flow can copy customer documents; B2 stores database dumps and
+   backup logs only.
+
+### Optional: Backblaze B2 backup destination
+
+Use a dedicated private B2 bucket. In Backblaze, create an application key
+restricted to that bucket with Read and Write access. Install the AWS CLI and
+create the protected backup environment file on the server:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y awscli
+mkdir -p /home/ubuntu/.config/jssf
+cp /home/ubuntu/jssf/deploy/backup.env.example /home/ubuntu/.config/jssf/backup.env
+chmod 600 /home/ubuntu/.config/jssf/backup.env
+nano /home/ubuntu/.config/jssf/backup.env
+```
+
+Set `B2_BUCKET`, `B2_KEY_ID`, `B2_APPLICATION_KEY`, and the HTTPS S3-compatible
+`B2_ENDPOINT`. The script loads this file automatically, so credentials do not
+belong in crontab or the repository. Daily dumps go to `database/daily/`, Sunday
+dumps also go to `database/weekly/`, first-of-month dumps also go to
+`database/monthly/`, and run logs go to `logs/`. With the file absent, B2 is
+skipped without affecting local or Google Drive backups.
+
+Validate the script and run a manual backup:
+
+```bash
+bash -n /home/ubuntu/jssf/deploy/backup-db.sh
+/usr/bin/bash /home/ubuntu/jssf/deploy/backup-db.sh
+```
 
 ---
 
