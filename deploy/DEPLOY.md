@@ -113,40 +113,50 @@ When it finishes: **https://yourdomain.com** is live (through Cloudflare).
    PATH=/usr/local/bin:/usr/bin:/bin
    17 2 * * * /usr/bin/bash /home/ubuntu/jssf/deploy/backup-db.sh >> /home/ubuntu/backups/backup.log 2>&1
    ```
-   For off-server copies, either create a private S3 bucket + IAM role with
-   `s3:PutObject` and set `S3_BUCKET`, configure an rclone `gdrive` remote, or
-   configure the environment-only Backblaze B2 destination below. The existing
-   Google Drive flow can copy customer documents; B2 stores database dumps and
-   backup logs only.
 
-### Optional: Backblaze B2 backup destination
+### Backblaze B2 backup destination (recommended)
 
-Use a dedicated private B2 bucket. In Backblaze, create an application key
-restricted to that bucket with Read and Write access. Install the AWS CLI and
-create the protected backup environment file on the server:
+The backup script uses the **AWS CLI** to upload database dumps to a private
+Backblaze B2 bucket via B2's S3-compatible API. Customer documents are stored
+in Cloudflare R2 by the application itself and are not copied by this script.
 
-```bash
-sudo apt-get update
-sudo apt-get install -y awscli
-mkdir -p /home/ubuntu/.config/jssf
-cp /home/ubuntu/jssf/deploy/backup.env.example /home/ubuntu/.config/jssf/backup.env
-chmod 600 /home/ubuntu/.config/jssf/backup.env
-nano /home/ubuntu/.config/jssf/backup.env
-```
+1. Create a private bucket and application key in Backblaze (Read + Write,
+   restricted to the bucket).
+2. Install the AWS CLI and create the credentials file:
 
-Set `B2_BUCKET`, `B2_KEY_ID`, `B2_APPLICATION_KEY`, and the HTTPS S3-compatible
-`B2_ENDPOINT`. The script loads this file automatically, so credentials do not
-belong in crontab or the repository. Daily dumps go to `database/daily/`, Sunday
-dumps also go to `database/weekly/`, first-of-month dumps also go to
-`database/monthly/`, and run logs go to `logs/`. With the file absent, B2 is
-skipped without affecting local or Google Drive backups.
+   ```bash
+   sudo apt-get update && sudo apt-get install -y awscli
+   mkdir -p /home/ubuntu/.config/jssf
+   ```
 
-Validate the script and run a manual backup:
+3. Create the backup environment file directly on the server:
 
-```bash
-bash -n /home/ubuntu/jssf/deploy/backup-db.sh
-/usr/bin/bash /home/ubuntu/jssf/deploy/backup-db.sh
-```
+   ```bash
+   cat << 'EOF' > /home/ubuntu/.config/jssf/backup.env
+   B2_BUCKET='jssf-backups'
+   B2_KEY_ID='your_backblaze_key_id'
+   B2_APPLICATION_KEY='your_backblaze_application_key'
+   B2_ENDPOINT='https://s3.YOUR-B2-REGION.backblazeb2.com'
+   EOF
+   chmod 600 /home/ubuntu/.config/jssf/backup.env
+   nano /home/ubuntu/.config/jssf/backup.env   # fill in real values
+   ```
+
+   The script loads this file automatically. Credentials never belong in
+   crontab or the repository. Daily dumps go to `database/daily/`, Sunday
+   dumps also go to `database/weekly/`, first-of-month dumps also go to
+   `database/monthly/`, and run logs go to `logs/`.
+
+4. Validate and run a manual test:
+
+   ```bash
+   bash -n /home/ubuntu/jssf/deploy/backup-db.sh
+   /usr/bin/bash /home/ubuntu/jssf/deploy/backup-db.sh
+   ```
+
+> **Note:** The previous backup script also supported Google Drive via rclone.
+> An archived copy is kept as `deploy/backup-db-gdrive.sh` — see
+> `deploy/BACKUP-LEGACY.md` if you ever need to restore that flow.
 
 ---
 
