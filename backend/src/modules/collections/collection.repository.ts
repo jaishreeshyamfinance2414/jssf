@@ -200,6 +200,87 @@ export const collectionRepository = {
   },
 
   /**
+   * Immediately reconcile past derived statement rows after a payment changes.
+   * Covered missed rows become Advance/Full, existing automatic coverage rows
+   * change classification, and automatic rows that are no longer funded are
+   * removed. The hourly sweep remains responsible for materializing dates that
+   * do not have a statement row yet.
+   */
+  async reconcileStatementCoverage(loanId: string, client: PoolClient) {
+    await client.query(
+      `WITH scheduled AS (
+         SELECT e.id,
+                sum(e.due_amount) OVER (
+                  ORDER BY e.installment_no
+                  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                ) AS cumulative_due
+           FROM emi_schedule e
+          WHERE e.loan_id = $1 AND e.due_date < CURRENT_DATE
+       ),
+       covered AS (
+         SELECT s.*,
+                COALESCE((SELECT sum(c.amount) FROM collections c WHERE c.loan_id = $1), 0) AS total_received
+           FROM scheduled s
+       )
+       UPDATE collections entry
+          SET type = CASE WHEN c.total_received > c.cumulative_due + 0.01
+                          THEN 'advance'::payment_type ELSE 'full'::payment_type END,
+              note = CASE
+                WHEN entry.created_by IS NULL AND c.total_received > c.cumulative_due + 0.01
+                  THEN 'Auto-marked: installment covered by advance payment'
+                WHEN entry.created_by IS NULL
+                  THEN 'Auto-marked: advance coverage completed on time'
+                ELSE entry.note
+              END
+         FROM covered c
+        WHERE entry.loan_id = $1
+          AND entry.emi_id = c.id
+          AND entry.amount = 0
+          AND (
+            entry.type = 'missed'
+            OR entry.note IN (
+              'Auto-marked: installment covered by advance payment',
+              'Auto-marked: advance coverage completed on time'
+            )
+          )
+          AND c.total_received >= c.cumulative_due - 0.01`,
+      [loanId],
+    );
+
+    await client.query(
+      `WITH scheduled AS (
+         SELECT e.id,
+                sum(e.due_amount) OVER (
+                  ORDER BY e.installment_no
+                  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                ) AS cumulative_due
+           FROM emi_schedule e
+          WHERE e.loan_id = $1 AND e.due_date < CURRENT_DATE
+       ),
+       totals AS (
+         SELECT COALESCE(sum(amount), 0) AS total_received
+           FROM collections
+          WHERE loan_id = $1
+       )
+       DELETE FROM collections marker
+        USING totals t
+        WHERE marker.loan_id = $1
+          AND marker.amount = 0
+          AND marker.note IN (
+            'Auto-marked: installment covered by advance payment',
+            'Auto-marked: advance coverage completed on time'
+          )
+          AND NOT EXISTS (
+            SELECT 1
+              FROM scheduled s
+             WHERE s.id = marker.emi_id
+               AND t.total_received >= s.cumulative_due - 0.01
+          )`,
+      [loanId],
+    );
+  },
+
+  /**
    * Agent explicitly marked the day missed — flip the EMI unless money already
    * covers it, and accrue the missed-day penalty (settings.penalty.per_day_pct
    * % of the loan principal) onto the EMI's missed_penalty and the loan's
@@ -280,20 +361,40 @@ export const collectionRepository = {
   /** Admin correction — collectedAt keeps the entry's original time-of-day on a new date. */
   async updateEntry(
     id: string,
-    input: { amount: number; penalty: number; type?: string; collectedAt: string | null },
+    input: {
+      amount: number;
+      penalty: number;
+      type?: string;
+      collectedAt: string | null;
+      takeOwnership?: { actorId: string };
+    },
     client: PoolClient,
   ) {
     await client.query(
       `UPDATE collections
           SET amount = $2, penalty = $3,
               type = COALESCE($4::payment_type, type),
-              collected_at = COALESCE($5::timestamptz, collected_at)
-        WHERE id = $1`,
-      [id, input.amount, input.penalty, input.type ?? null, input.collectedAt],
+              collected_at = COALESCE($5::timestamptz, collected_at),
+              agent_id = CASE WHEN $6::uuid IS NULL THEN agent_id ELSE $6::uuid END,
+              created_by = CASE WHEN $6::uuid IS NULL THEN created_by ELSE $6::uuid END,
+              note = CASE WHEN $6::uuid IS NULL THEN note ELSE NULL END
+         WHERE id = $1`,
+      [id, input.amount, input.penalty, input.type ?? null, input.collectedAt, input.takeOwnership?.actorId ?? null],
     );
   },
 
   async deleteById(id: string, client: PoolClient) {
     await client.query(`DELETE FROM collections WHERE id = $1`, [id]);
+  },
+
+  /** Prevent the hourly sweep from recreating an automatic statement row deleted by an admin. */
+  async suppressAutomaticStatementEntry(emiId: string, loanId: string, actorId: string, client: PoolClient) {
+    await client.query(
+      `INSERT INTO statement_entry_suppressions(emi_id, loan_id, suppressed_by)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (emi_id) DO UPDATE
+         SET suppressed_by = EXCLUDED.suppressed_by, created_at = now()`,
+      [emiId, loanId, actorId],
+    );
   },
 };

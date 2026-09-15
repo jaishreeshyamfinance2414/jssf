@@ -564,6 +564,7 @@ export default function LoansPage() {
                   rows={history.collections.map((c) => {
                     const delayed = c.due_date ? new Date(c.collected_at) > endOfDay(c.due_date) : false;
                     const isCoverageMarker = isAdvanceCoverageMarker(c);
+                    const canModifyCoverageMarker = !isCoverageMarker || user?.role === 'admin';
                     return [
                       dateTime(c.collected_at),
                       c.installment_no ?? '-',
@@ -585,14 +586,14 @@ export default function LoansPage() {
                             ? (delayed ? 'Delayed' : 'On time')
                             : 'Manual',
                       <div key={c.id} className="flex flex-wrap gap-2">
-                        {isCoverageMarker ? (
+                        {isCoverageMarker && user?.role !== 'admin' ? (
                           <span className="text-xs text-muted-foreground">System entry</span>
-                        ) : can('collection.update') && (
+                        ) : can('collection.update') && canModifyCoverageMarker && (
                           <Button size="sm" variant="outline" disabled={updateCollection.isPending} onClick={() => startEditCollection(c)}>
                             <Pencil className="h-4 w-4" /> Edit
                           </Button>
                         )}
-                        {!isCoverageMarker && can('collection.delete') && (
+                        {canModifyCoverageMarker && can('collection.delete') && (
                           <Button
                             size="sm"
                             variant="danger"

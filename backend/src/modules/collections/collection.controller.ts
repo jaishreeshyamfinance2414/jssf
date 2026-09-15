@@ -31,11 +31,11 @@ export const collectionController = {
   },
 
   async update(req: Request, res: Response) {
-    return ok(res, await collectionService.update(req.params.id, req.body, req.user!.sub, req.ip));
+    return ok(res, await collectionService.update(req.params.id, req.body, req.user!.sub, req.user!.role, req.ip));
   },
 
   async remove(req: Request, res: Response) {
-    return ok(res, await collectionService.remove(req.params.id, req.user!.sub, req.ip));
+    return ok(res, await collectionService.remove(req.params.id, req.user!.sub, req.user!.role, req.ip));
   },
 };
 

@@ -141,6 +141,7 @@ export const collectionService = {
       // Redistribute the loan's collected total across the schedule — an
       // overpayment marks today paid and upcoming EMIs 'advance'.
       await collectionRepository.rebuildEmiState(input.loanId, client);
+      await collectionRepository.reconcileStatementCoverage(input.loanId, client);
       await loanRepository.markClosedIfFullyPaid(input.loanId, client);
 
       if (input.mode !== 'cash' || isDirectAdminCash) {
@@ -184,12 +185,13 @@ export const collectionService = {
    * rebuild everything derived from it — EMI fill/status, the cash/bank
    * ledger row, agent handover expectations, and the loan's closed state.
    */
-  async update(id: string, input: UpdateCollectionBody, actorId: string, ip?: string | null) {
+  async update(id: string, input: UpdateCollectionBody, actorId: string, actorRole: string, ip?: string | null) {
     return withTransaction(async (client) => {
       const collection = await collectionRepository.findByIdForUpdate(id, client);
       if (!collection) throw BadRequest('Collection entry not found');
-      if (isAutomaticCoverageMarker(collection)) {
-        throw BadRequest('Automatic advance-coverage statement entries cannot be edited. Correct the original payment instead.');
+      const wasAutomaticCoverageMarker = isAutomaticCoverageMarker(collection);
+      if (wasAutomaticCoverageMarker && actorRole !== 'admin') {
+        throw BadRequest('Only an admin can edit an automatic advance-coverage entry.');
       }
 
       const loan = await loanRepository.lockForUpdate(collection.loan_id, client);
@@ -223,6 +225,9 @@ export const collectionService = {
         newAmount = input.amount;
         newPenalty = input.penalty ?? 0;
       }
+      if (!wasAutomaticCoverageMarker && oldAmount > 0 && newType !== 'missed' && newAmount <= 0) {
+        throw BadRequest('Payment amount must be greater than 0.');
+      }
 
       // The edited amount must still fit in the loan's total payable.
       const totalPayable = Number(loan.total_payable);
@@ -242,7 +247,13 @@ export const collectionService = {
 
       await collectionRepository.updateEntry(
         id,
-        { amount: newAmount, penalty: newPenalty, type: newType, collectedAt },
+        {
+          amount: newAmount,
+          penalty: newPenalty,
+          type: newType,
+          collectedAt,
+          takeOwnership: wasAutomaticCoverageMarker ? { actorId } : undefined,
+        },
         client,
       );
 
@@ -265,6 +276,21 @@ export const collectionService = {
           description: `Collection (type correction) for ${loan.loan_number}`,
           createdBy: actorId,
         });
+      } else if (wasAutomaticCoverageMarker && newAmount > 0) {
+        // Editing a generated zero-value row into a real payment makes the
+        // admin its owner and creates the financial posting that did not exist
+        // for the derived entry.
+        const account = await accountsRepository.getByType(collection.mode === 'cash' ? 'cash' : 'bank', client);
+        await ledgerService.post(client, {
+          accountId: account.id,
+          direction: 'credit',
+          amount: newAmount + newPenalty,
+          source: 'collection',
+          referenceId: id,
+          description: `Collection (automatic entry correction) for ${loan.loan_number}`,
+          createdBy: actorId,
+          txnDate: input.collectedDate ?? null,
+        });
       } else if (collection.type !== 'missed') {
         // Regular amount/penalty/date edit on a payment entry
         await accountsRepository.updateBySourceRef(
@@ -280,6 +306,7 @@ export const collectionService = {
       }
 
       await collectionRepository.rebuildEmiState(collection.loan_id, client);
+      await collectionRepository.reconcileStatementCoverage(collection.loan_id, client);
 
       // The edit may complete the loan — or reopen one that auto-closed.
       const closed = await loanRepository.markClosedIfFullyPaid(collection.loan_id, client);
@@ -314,12 +341,13 @@ export const collectionService = {
    * automatic full-payment loan closure. Loan "remaining" is computed from
    * SUM(collections.amount), so removing the row restores the balance itself.
    */
-  async remove(id: string, actorId: string, ip?: string | null) {
+  async remove(id: string, actorId: string, actorRole: string, ip?: string | null) {
     return withTransaction(async (client) => {
       const collection = await collectionRepository.findByIdForUpdate(id, client);
       if (!collection) throw BadRequest('Collection entry not found');
-      if (isAutomaticCoverageMarker(collection)) {
-        throw BadRequest('Automatic advance-coverage statement entries cannot be deleted. Correct the original payment instead.');
+      const wasAutomaticCoverageMarker = isAutomaticCoverageMarker(collection);
+      if (wasAutomaticCoverageMarker && actorRole !== 'admin') {
+        throw BadRequest('Only an admin can delete an automatic advance-coverage entry.');
       }
 
       // Serialize with concurrent collection recording on the same loan.
@@ -349,6 +377,14 @@ export const collectionService = {
       // remove it. Safe no-op for unreconciled agent cash (never hit the ledger).
       await accountsRepository.deleteBySourceRef('collection', id, client);
 
+      if (wasAutomaticCoverageMarker && collection.emi_id) {
+        await collectionRepository.suppressAutomaticStatementEntry(
+          collection.emi_id,
+          collection.loan_id,
+          actorId,
+          client,
+        );
+      }
       await collectionRepository.deleteById(id, client);
 
       // Deleting a 'missed' day entry also takes back the penalty it accrued
@@ -359,6 +395,7 @@ export const collectionService = {
       }
 
       await collectionRepository.rebuildEmiState(collection.loan_id, client);
+      await collectionRepository.reconcileStatementCoverage(collection.loan_id, client);
 
       // If this collection had auto-closed the loan (closed_by stays NULL for
       // markClosedIfFullyPaid closures), reopen it.

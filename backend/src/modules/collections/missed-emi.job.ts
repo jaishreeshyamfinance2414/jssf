@@ -60,21 +60,55 @@ export async function sweepMissedEmis(): Promise<{
       );
       logger.debug({ rows: marked.rowCount }, 'Sweep: EMIs marked missed');
 
-      // Materialize statement rows for installments that were fully funded by
-      // an earlier advance payment. The classification is based on money that
-      // had actually been received by the end of each due date:
+      // Materialize statement rows for installments that are fully funded by
+      // the loan's current collected total. This deliberately recalculates old
+      // missed days after an admin corrects/deletes an entry or records a
+      // larger advance payment:
       //
       //   received > cumulative due  -> this day was covered in advance
       //   received = cumulative due  -> this is the final covered, on-time day
       //
       // A real collection made on the due date always wins; in that case no
-      // synthetic row is added. Using historical amounts rather than the EMI's
-      // current status also makes this safe to backfill after restarts and for
-      // advance rows that have already matured from 'advance' to 'paid'.
+      // synthetic row is added. Existing zero-value missed rows are converted
+      // below so they no longer block the corrected advance classification.
       // First discard derived rows that became stale after an admin corrected
       // an older payment amount/date. The insert below rebuilds the right row
       // in the same transaction when only its Advance/Full classification
       // changed.
+      await client.query(
+        `WITH scheduled AS (
+           SELECT e.id, e.loan_id,
+                  sum(e.due_amount) OVER (
+                    PARTITION BY e.loan_id
+                    ORDER BY e.installment_no
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                  ) AS cumulative_due
+             FROM emi_schedule e
+             JOIN loans l ON l.id = e.loan_id AND l.status = 'active'
+            WHERE e.due_date < CURRENT_DATE
+         ),
+         covered AS (
+           SELECT s.*,
+                  COALESCE((SELECT sum(c.amount) FROM collections c WHERE c.loan_id = s.loan_id), 0) AS total_received
+             FROM scheduled s
+         )
+         UPDATE collections entry
+            SET type = CASE WHEN c.total_received > c.cumulative_due + 0.01
+                            THEN 'advance'::payment_type ELSE 'full'::payment_type END,
+                note = CASE
+                  WHEN entry.created_by IS NULL AND c.total_received > c.cumulative_due + 0.01
+                    THEN 'Auto-marked: installment covered by advance payment'
+                  WHEN entry.created_by IS NULL
+                    THEN 'Auto-marked: advance coverage completed on time'
+                  ELSE entry.note
+                END
+           FROM covered c
+          WHERE entry.emi_id = c.id
+            AND entry.amount = 0
+            AND entry.type = 'missed'
+            AND c.total_received >= c.cumulative_due - 0.01`,
+      );
+
       await client.query(
         `WITH scheduled AS (
            SELECT e.id, e.loan_id, e.due_date,
@@ -88,12 +122,7 @@ export async function sweepMissedEmis(): Promise<{
          ),
          desired AS (
            SELECT s.*,
-                  COALESCE((
-                    SELECT sum(c.amount)
-                      FROM collections c
-                     WHERE c.loan_id = s.loan_id
-                       AND c.collected_at < s.due_date::timestamp + interval '1 day'
-                  ), 0) AS received_by_due
+                  COALESCE((SELECT sum(c.amount) FROM collections c WHERE c.loan_id = s.loan_id), 0) AS total_received
              FROM scheduled s
             WHERE s.due_date < CURRENT_DATE
          )
@@ -122,9 +151,9 @@ export async function sweepMissedEmis(): Promise<{
               OR NOT EXISTS (
                 SELECT 1 FROM desired d
                  WHERE d.id = marker.emi_id
-                   AND d.received_by_due >= d.cumulative_due - 0.01
+                   AND d.total_received >= d.cumulative_due - 0.01
                    AND marker.type = CASE
-                     WHEN d.received_by_due > d.cumulative_due + 0.01
+                     WHEN d.total_received > d.cumulative_due + 0.01
                        THEN 'advance'::payment_type
                      ELSE 'full'::payment_type
                    END
@@ -145,29 +174,28 @@ export async function sweepMissedEmis(): Promise<{
          ),
          covered AS (
            SELECT s.*,
-                  COALESCE((
-                    SELECT sum(c.amount)
-                      FROM collections c
-                     WHERE c.loan_id = s.loan_id
-                       AND c.collected_at < s.due_date::timestamp + interval '1 day'
-                  ), 0) AS received_by_due
+                  COALESCE((SELECT sum(c.amount) FROM collections c WHERE c.loan_id = s.loan_id), 0) AS total_received
              FROM scheduled s
             WHERE s.due_date < CURRENT_DATE
          )
          INSERT INTO collections(loan_id, emi_id, amount, penalty, type, mode, note, reconciled_at, collected_at)
          SELECT c.loan_id, c.id, 0, 0,
-                CASE WHEN c.received_by_due > c.cumulative_due + 0.01
+                CASE WHEN c.total_received > c.cumulative_due + 0.01
                      THEN 'advance'::payment_type
                      ELSE 'full'::payment_type
                 END,
                 'cash',
-                CASE WHEN c.received_by_due > c.cumulative_due + 0.01
+                CASE WHEN c.total_received > c.cumulative_due + 0.01
                      THEN 'Auto-marked: installment covered by advance payment'
                      ELSE 'Auto-marked: advance coverage completed on time'
                 END,
                 now(), c.due_date::timestamp + interval '23 hours 59 minutes'
            FROM covered c
-          WHERE c.received_by_due >= c.cumulative_due - 0.01
+          WHERE c.total_received >= c.cumulative_due - 0.01
+            AND NOT EXISTS (
+              SELECT 1 FROM statement_entry_suppressions suppressed
+               WHERE suppressed.emi_id = c.id
+            )
             AND NOT EXISTS (
               SELECT 1 FROM collections existing
                WHERE existing.loan_id = c.loan_id

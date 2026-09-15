@@ -450,6 +450,7 @@ export default function CollectionsPage() {
           columns={['Date & Time', 'Loan', 'Customer', 'Amount', 'Penalty', 'Type', 'Mode', 'Agent', 'Action']}
           rows={collections.map((c) => {
             const isCoverageMarker = Number(c.amount) === 0 && ['advance', 'full'].includes(c.type) && c.note?.startsWith('Auto-marked:');
+            const canModifyCoverageMarker = !isCoverageMarker || user?.role === 'admin';
             return [
               dateTime(c.collected_at),
               c.loan_number,
@@ -462,14 +463,14 @@ export default function CollectionsPage() {
               Number(c.amount) === 0 ? '-' : c.mode === 'cash' ? 'Cash' : 'UPI/Bank',
               isCoverageMarker ? 'Automatic' : c.agent_name ?? '-',
               <div key={c.id} className="flex flex-wrap gap-2">
-                {isCoverageMarker ? (
+                {isCoverageMarker && user?.role !== 'admin' ? (
                   <span className="text-xs text-muted-foreground">System entry</span>
-                ) : can('collection.update') && (
+                ) : can('collection.update') && canModifyCoverageMarker && (
                   <Button size="sm" variant="outline" disabled={update.isPending} onClick={() => startEdit(c)}>
                     <Pencil className="h-4 w-4" /> Edit
                   </Button>
                 )}
-                {!isCoverageMarker && can('collection.delete') && (
+                {canModifyCoverageMarker && can('collection.delete') && (
                   <Button
                     size="sm"
                     variant="danger"
