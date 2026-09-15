@@ -3,7 +3,8 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
-import { ArrowUpDown, Eye, Loader2, Plus, Power, PowerOff, Search, Trash2, Upload } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ArrowUpDown, Eye, History, Loader2, Plus, Power, PowerOff, Search, Trash2, Upload } from 'lucide-react';
 import { api, apiDelete, apiGet, fetchFileUrl } from '@/lib/api';
 import { compressFormImages, compressImageFile } from '@/lib/compress-image';
 import { useAuth } from '@/lib/auth-context';
@@ -115,6 +116,7 @@ interface CustomerDetail extends Customer {
 }
 
 export default function CustomersPage() {
+  const router = useRouter();
   const qc = useQueryClient();
   const { can, user } = useAuth();
   const [show, setShow] = useState(false);
@@ -595,8 +597,34 @@ export default function CustomersPage() {
               </div>
             </div>
             <DataTable
-              columns={['Loan No', 'Amount', 'Frequency', 'Status', 'Date']}
-              rows={selected.loans.map((l) => [l.loan_number, money(l.principal), `${l.emi_frequency} x ${l.tenure_count}`, l.status, date(l.loan_date)])}
+              columns={['Loan No', 'Amount', 'Frequency', 'Status', 'Date', 'Statement']}
+              rows={selected.loans.map((l) => [
+                <span key={`${l.id}-number`} className="font-semibold">{l.loan_number}</span>,
+                money(l.principal),
+                `${l.emi_frequency} x ${l.tenure_count}`,
+                <CustomerLoanStatus key={`${l.id}-status`} status={l.status} />,
+                date(l.loan_date),
+                <div key={`${l.id}-statement`}>
+                  {['active', 'closed'].includes(l.status) ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="border-primary/30 bg-card hover:border-primary/50 hover:bg-primary/10"
+                      onClick={() => router.push(`/loans?focus=${encodeURIComponent(l.id)}`)}
+                    >
+                      <History className="h-4 w-4" /> Statement
+                    </Button>
+                  ) : '-'}
+                </div>,
+              ])}
+              rowClassNames={selected.loans.map((l) =>
+                l.status === 'active'
+                  ? 'border-success/40 bg-success/[0.06] hover:bg-success/[0.09]'
+                  : l.status === 'closed'
+                    ? 'border-info/40 bg-info/[0.06] hover:bg-info/[0.09]'
+                    : '',
+              )}
               empty="No loans for this customer"
             />
           </CardContent>
@@ -688,6 +716,21 @@ function Info({ label, value }: { label: string; value: string | null | undefine
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-1 text-sm font-medium">{value || '-'}</div>
     </div>
+  );
+}
+
+function CustomerLoanStatus({ status }: { status: string }) {
+  const theme = status === 'active'
+    ? 'border-success/30 bg-success/15 text-success'
+    : status === 'closed'
+      ? 'border-info/30 bg-info/15 text-info'
+      : 'border-border bg-muted text-muted-foreground';
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold capitalize ${theme}`}>
+      <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
+      {status.replaceAll('_', ' ')}
+    </span>
   );
 }
 

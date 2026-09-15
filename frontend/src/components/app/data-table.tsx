@@ -11,12 +11,15 @@ export function DataTable({
   rows,
   empty = 'No records found',
   mobilePrimary = [0],
+  rowClassNames,
 }: {
   columns: string[];
   rows: ReactNode[][];
   empty?: string;
   /** Column indexes rendered prominently at the top of each mobile card. */
   mobilePrimary?: number[];
+  /** Optional per-row theme classes, applied to desktop rows and mobile cards. */
+  rowClassNames?: string[];
 }) {
   if (!rows.length) {
     return (
@@ -31,7 +34,7 @@ export function DataTable({
       {/* Mobile: stacked cards */}
       <div className="space-y-3 md:hidden">
         {rows.map((row, i) => (
-          <div key={i} className="rounded-xl border bg-card p-4 shadow-sm">
+          <div key={i} className={`rounded-xl border bg-card p-4 shadow-sm ${rowClassNames?.[i] ?? ''}`}>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border/60 pb-2.5">
               {mobilePrimary.map((idx) =>
                 row[idx] != null ? (
@@ -85,7 +88,7 @@ export function DataTable({
             </thead>
             <tbody>
               {rows.map((row, i) => (
-                <tr key={i} className="border-t">
+                <tr key={i} className={`border-t ${rowClassNames?.[i] ?? ''}`}>
                   {row.map((cell, j) => (
                     <td key={j} className="px-4 py-3 align-top">
                       {cell}
