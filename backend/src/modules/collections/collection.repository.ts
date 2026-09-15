@@ -15,11 +15,13 @@ export const collectionRepository = {
   async list() {
     const { rows } = await query(
       `SELECT co.*, l.loan_number, c.full_name AS customer_name, c.mobile AS customer_mobile,
-              u.full_name AS agent_name, e.missed_penalty
+              COALESCE(agent.full_name, creator.full_name, 'Automatic') AS agent_name,
+              e.missed_penalty
          FROM collections co
          JOIN loans l ON l.id = co.loan_id
          JOIN customers c ON c.id = l.customer_id
-         LEFT JOIN users u ON u.id = co.agent_id
+         LEFT JOIN users agent ON agent.id = co.agent_id
+         LEFT JOIN users creator ON creator.id = co.created_by
          LEFT JOIN emi_schedule e ON e.id = co.emi_id
         ORDER BY co.collected_at DESC
         LIMIT 300`,

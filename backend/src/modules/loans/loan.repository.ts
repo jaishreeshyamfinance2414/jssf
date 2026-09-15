@@ -381,10 +381,11 @@ export const loanRepository = {
 
   async collectionsFor(loanId: string) {
     const { rows } = await query(
-      `SELECT co.*, u.full_name AS agent_name,
+      `SELECT co.*, COALESCE(agent.full_name, creator.full_name, 'Automatic') AS agent_name,
               e.installment_no, e.due_date, e.due_amount, e.status AS emi_status, e.missed_penalty
          FROM collections co
-         LEFT JOIN users u ON u.id = co.agent_id
+         LEFT JOIN users agent ON agent.id = co.agent_id
+         LEFT JOIN users creator ON creator.id = co.created_by
          LEFT JOIN emi_schedule e ON e.id = co.emi_id
         WHERE co.loan_id = $1 ORDER BY co.collected_at DESC`,
       [loanId],

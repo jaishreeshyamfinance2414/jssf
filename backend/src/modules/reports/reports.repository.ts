@@ -107,10 +107,12 @@ export const reportsRepository = {
     );
     const { rows: entries } = await query(
       `SELECT co.collected_at, l.loan_number, co.amount::text, co.penalty::text,
-              co.type, co.mode, u.full_name AS agent_name
+              co.type, co.mode,
+              COALESCE(agent.full_name, creator.full_name, 'Automatic') AS agent_name
          FROM collections co
          JOIN loans l ON l.id = co.loan_id
-         LEFT JOIN users u ON u.id = co.agent_id
+         LEFT JOIN users agent ON agent.id = co.agent_id
+         LEFT JOIN users creator ON creator.id = co.created_by
         WHERE l.customer_id = $1
         ORDER BY co.collected_at DESC
         LIMIT 500`,
