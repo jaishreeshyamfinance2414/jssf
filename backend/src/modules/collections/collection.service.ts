@@ -165,6 +165,9 @@ export const collectionService = {
     return withTransaction(async (client) => {
       const collection = await collectionRepository.findByIdForUpdate(id, client);
       if (!collection) throw BadRequest('Collection entry not found');
+      if (isAutomaticCoverageMarker(collection)) {
+        throw BadRequest('Automatic advance-coverage statement entries cannot be edited. Correct the original payment instead.');
+      }
 
       const loan = await loanRepository.lockForUpdate(collection.loan_id, client);
       if (!loan) throw BadRequest('Loan not found');
@@ -292,6 +295,9 @@ export const collectionService = {
     return withTransaction(async (client) => {
       const collection = await collectionRepository.findByIdForUpdate(id, client);
       if (!collection) throw BadRequest('Collection entry not found');
+      if (isAutomaticCoverageMarker(collection)) {
+        throw BadRequest('Automatic advance-coverage statement entries cannot be deleted. Correct the original payment instead.');
+      }
 
       // Serialize with concurrent collection recording on the same loan.
       const loan = await loanRepository.lockForUpdate(collection.loan_id, client);
@@ -360,6 +366,15 @@ export const collectionService = {
     });
   },
 };
+
+function isAutomaticCoverageMarker(collection: { amount: string | number; type: string; note?: string | null }): boolean {
+  return Number(collection.amount) === 0 &&
+    ['advance', 'full'].includes(collection.type) &&
+    [
+      'Auto-marked: installment covered by advance payment',
+      'Auto-marked: advance coverage completed on time',
+    ].includes(collection.note ?? '');
+}
 
 /** full = exactly the anchor EMI's remaining due, advance = more, partial = less. */
 async function classifyPayment(

@@ -33,7 +33,7 @@ interface Due {
   received: string;
   remaining: string;
 }
-interface Collection { id: string; loan_number: string; customer_name: string; amount: string; penalty: string; type: string; mode: string; collected_at: string; agent_name: string | null; agent_ledger_id: string | null; missed_penalty: string | null }
+interface Collection { id: string; loan_number: string; customer_name: string; amount: string; penalty: string; type: string; mode: string; collected_at: string; agent_name: string | null; agent_ledger_id: string | null; missed_penalty: string | null; note: string | null }
 interface LoanSearchResult {
   id: string;
   loan_number: string;
@@ -428,40 +428,45 @@ export default function CollectionsPage() {
       {showLedger && (
         <DataTable
           columns={['Date & Time', 'Loan', 'Customer', 'Amount', 'Penalty', 'Type', 'Mode', 'Agent', 'Action']}
-          rows={collections.map((c) => [
-            dateTime(c.collected_at),
-            c.loan_number,
-            c.customer_name,
-            money(c.amount),
-            c.type === 'missed'
-              ? <span key={`${c.id}-pen`} className="font-medium text-danger">+{money(c.missed_penalty ?? 0)}</span>
-              : money(c.penalty),
-            <StatusPill key={`${c.id}-type`} value={TYPE_LABEL[c.type] ?? c.type} />,
-            c.type === 'missed' ? '-' : c.mode === 'cash' ? 'Cash' : 'UPI/Bank',
-            c.agent_name ?? '-',
-            <div key={c.id} className="flex flex-wrap gap-2">
-              {can('collection.update') && (
-                <Button size="sm" variant="outline" disabled={update.isPending} onClick={() => startEdit(c)}>
-                  <Pencil className="h-4 w-4" /> Edit
-                </Button>
-              )}
-              {can('collection.delete') && (
-                <Button
-                  size="sm"
-                  variant="danger"
-                  disabled={remove.isPending}
-                  onClick={() => {
-                    if (confirm(`Delete this collection of ${money(c.amount)} for loan ${c.loan_number}? The loan balance and EMI will be restored.`)) {
-                      remove.mutate(c.id);
-                    }
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" /> Delete
-                </Button>
-              )}
-              {!can('collection.update') && !can('collection.delete') && '-'}
-            </div>,
-          ])}
+          rows={collections.map((c) => {
+            const isCoverageMarker = Number(c.amount) === 0 && ['advance', 'full'].includes(c.type) && c.note?.startsWith('Auto-marked:');
+            return [
+              dateTime(c.collected_at),
+              c.loan_number,
+              c.customer_name,
+              money(c.amount),
+              c.type === 'missed'
+                ? <span key={`${c.id}-pen`} className="font-medium text-danger">+{money(c.missed_penalty ?? 0)}</span>
+                : money(c.penalty),
+              <StatusPill key={`${c.id}-type`} value={TYPE_LABEL[c.type] ?? c.type} />,
+              Number(c.amount) === 0 ? '-' : c.mode === 'cash' ? 'Cash' : 'UPI/Bank',
+              isCoverageMarker ? 'Automatic' : c.agent_name ?? '-',
+              <div key={c.id} className="flex flex-wrap gap-2">
+                {isCoverageMarker ? (
+                  <span className="text-xs text-muted-foreground">System entry</span>
+                ) : can('collection.update') && (
+                  <Button size="sm" variant="outline" disabled={update.isPending} onClick={() => startEdit(c)}>
+                    <Pencil className="h-4 w-4" /> Edit
+                  </Button>
+                )}
+                {!isCoverageMarker && can('collection.delete') && (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    disabled={remove.isPending}
+                    onClick={() => {
+                      if (confirm(`Delete this collection of ${money(c.amount)} for loan ${c.loan_number}? The loan balance and EMI will be restored.`)) {
+                        remove.mutate(c.id);
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" /> Delete
+                  </Button>
+                )}
+                {!isCoverageMarker && !can('collection.update') && !can('collection.delete') && '-'}
+              </div>,
+            ];
+          })}
         />
       )}
     </PageShell>

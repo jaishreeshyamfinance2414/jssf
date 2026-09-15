@@ -54,6 +54,7 @@ interface LoanDetail {
     collected_at: string;
     agent_name: string | null;
     agent_ledger_id: string | null;
+    note: string | null;
     installment_no: number | null;
     due_date: string | null;
     due_amount: string | null;
@@ -477,11 +478,12 @@ export default function LoansPage() {
           <CardContent className="space-y-5">
             {history && summary ? (
               <>
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-8">
                   <Metric label="Total Payable" value={money(summary.totalPayable)} />
                   <Metric label="Paid" value={money(summary.paid)} />
                   <Metric label="Remaining" value={money(summary.remaining)} />
                   <Metric label="Penalty Added" value={money(summary.penalty)} />
+                  <Metric label="Advance Payment" value={String(summary.advance)} />
                   <Metric label="On Time" value={String(summary.onTime)} />
                   <Metric label="Delayed" value={String(summary.delayed)} />
                   <Metric label="Missed" value={String(summary.missed)} />
@@ -561,6 +563,7 @@ export default function LoansPage() {
                   columns={['Collected On', 'EMI No', 'Due Date', 'Amount', 'Penalty', 'Type', 'Mode', 'Agent', 'Timing', 'Action']}
                   rows={history.collections.map((c) => {
                     const delayed = c.due_date ? new Date(c.collected_at) > endOfDay(c.due_date) : false;
+                    const isCoverageMarker = isAdvanceCoverageMarker(c);
                     return [
                       dateTime(c.collected_at),
                       c.installment_no ?? '-',
@@ -572,16 +575,24 @@ export default function LoansPage() {
                         ? <span key={`${c.id}-pen`} className="font-medium text-danger">+{money(c.missed_penalty ?? 0)}</span>
                         : money(c.penalty),
                       <StatusPill key={`${c.id}-type`} value={TYPE_LABEL[c.type] ?? c.type} />,
-                      c.type === 'missed' ? '-' : c.mode === 'cash' ? 'Cash' : 'UPI/Bank',
-                      c.agent_name ?? '-',
-                      c.due_date ? (delayed ? 'Delayed' : 'On time') : 'Advance/manual',
+                      Number(c.amount) === 0 ? '-' : c.mode === 'cash' ? 'Cash' : 'UPI/Bank',
+                      isCoverageMarker ? 'Automatic' : c.agent_name ?? '-',
+                      c.type === 'advance'
+                        ? 'Advance'
+                        : isCoverageMarker
+                          ? 'On time'
+                          : c.due_date
+                            ? (delayed ? 'Delayed' : 'On time')
+                            : 'Manual',
                       <div key={c.id} className="flex flex-wrap gap-2">
-                        {can('collection.update') && (
+                        {isCoverageMarker ? (
+                          <span className="text-xs text-muted-foreground">System entry</span>
+                        ) : can('collection.update') && (
                           <Button size="sm" variant="outline" disabled={updateCollection.isPending} onClick={() => startEditCollection(c)}>
                             <Pencil className="h-4 w-4" /> Edit
                           </Button>
                         )}
-                        {can('collection.delete') && (
+                        {!isCoverageMarker && can('collection.delete') && (
                           <Button
                             size="sm"
                             variant="danger"
@@ -595,7 +606,7 @@ export default function LoansPage() {
                             <Trash2 className="h-4 w-4" /> Delete
                           </Button>
                         )}
-                        {!can('collection.update') && !can('collection.delete') && '-'}
+                        {!isCoverageMarker && !can('collection.update') && !can('collection.delete') && '-'}
                       </div>,
                     ];
                   })}
@@ -691,6 +702,15 @@ function endOfDay(value: string) {
   return d;
 }
 
+function isAdvanceCoverageMarker(collection: { amount: string; type: string; note: string | null }): boolean {
+  return Number(collection.amount) === 0 &&
+    ['advance', 'full'].includes(collection.type) &&
+    [
+      'Auto-marked: installment covered by advance payment',
+      'Auto-marked: advance coverage completed on time',
+    ].includes(collection.note ?? '');
+}
+
 function buildPaymentSummary(detail: LoanDetail) {
   // Paid = sum of every collection actually recorded against this loan (matches
   // the backend's remaining-balance enforcement in collection.service.ts), not
@@ -705,7 +725,16 @@ function buildPaymentSummary(detail: LoanDetail) {
   const penalty = detail.schedule.reduce((sum, e) => sum + Number(e.missed_penalty || 0), 0);
   // Zero-amount 'missed' day entries are not payments — keep them out of the timing stats.
   const payments = detail.collections.filter((c) => c.type !== 'missed');
-  const onTime = payments.filter((c) => c.due_date && new Date(c.collected_at) <= endOfDay(c.due_date)).length;
-  const delayed = payments.filter((c) => c.due_date && new Date(c.collected_at) > endOfDay(c.due_date)).length;
-  return { totalPayable, paid, remaining, penalty, missed, onTime, delayed };
+  // Advance entries are their own statement category. This includes the real
+  // lump-sum collection and each zero-value day it covers before the final
+  // covered installment, which is counted as on time.
+  const advance = payments.filter((c) => c.type === 'advance').length;
+  const regularPayments = payments.filter((c) => c.type !== 'advance');
+  const onTime = regularPayments.filter((c) =>
+    isAdvanceCoverageMarker(c) || (c.due_date && new Date(c.collected_at) <= endOfDay(c.due_date)),
+  ).length;
+  const delayed = regularPayments.filter((c) =>
+    !isAdvanceCoverageMarker(c) && c.due_date && new Date(c.collected_at) > endOfDay(c.due_date),
+  ).length;
+  return { totalPayable, paid, remaining, penalty, missed, advance, onTime, delayed };
 }

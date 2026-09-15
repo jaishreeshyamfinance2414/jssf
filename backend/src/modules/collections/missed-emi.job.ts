@@ -17,10 +17,16 @@ import { withTransaction } from '../../db/pool';
  */
 let running = false;
 
-export async function sweepMissedEmis(): Promise<{ missedMarked: number; penalized: number; advancesMatured: number }> {
+export async function sweepMissedEmis(): Promise<{
+  missedMarked: number;
+  penalized: number;
+  advancesMatured: number;
+  advanceEntries: number;
+  onTimeEntries: number;
+}> {
   if (running) {
     logger.warn('Sweep already running — skipping duplicate invocation');
-    return { missedMarked: 0, penalized: 0, advancesMatured: 0 };
+    return { missedMarked: 0, penalized: 0, advancesMatured: 0, advanceEntries: 0, onTimeEntries: 0 };
   }
   running = true;
   try {
@@ -53,6 +59,128 @@ export async function sweepMissedEmis(): Promise<{ missedMarked: number; penaliz
             AND e.status IN ('pending', 'partial')`,
       );
       logger.debug({ rows: marked.rowCount }, 'Sweep: EMIs marked missed');
+
+      // Materialize statement rows for installments that were fully funded by
+      // an earlier advance payment. The classification is based on money that
+      // had actually been received by the end of each due date:
+      //
+      //   received > cumulative due  -> this day was covered in advance
+      //   received = cumulative due  -> this is the final covered, on-time day
+      //
+      // A real collection made on the due date always wins; in that case no
+      // synthetic row is added. Using historical amounts rather than the EMI's
+      // current status also makes this safe to backfill after restarts and for
+      // advance rows that have already matured from 'advance' to 'paid'.
+      // First discard derived rows that became stale after an admin corrected
+      // an older payment amount/date. The insert below rebuilds the right row
+      // in the same transaction when only its Advance/Full classification
+      // changed.
+      await client.query(
+        `WITH scheduled AS (
+           SELECT e.id, e.loan_id, e.due_date,
+                  sum(e.due_amount) OVER (
+                    PARTITION BY e.loan_id
+                    ORDER BY e.installment_no
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                  ) AS cumulative_due
+             FROM emi_schedule e
+             JOIN loans l ON l.id = e.loan_id AND l.status = 'active'
+         ),
+         desired AS (
+           SELECT s.*,
+                  COALESCE((
+                    SELECT sum(c.amount)
+                      FROM collections c
+                     WHERE c.loan_id = s.loan_id
+                       AND c.collected_at < s.due_date::timestamp + interval '1 day'
+                  ), 0) AS received_by_due
+             FROM scheduled s
+            WHERE s.due_date < CURRENT_DATE
+         )
+         DELETE FROM collections marker
+          USING loans l
+          WHERE marker.loan_id = l.id
+            AND l.status = 'active'
+            AND marker.amount = 0
+            AND marker.note IN (
+              'Auto-marked: installment covered by advance payment',
+              'Auto-marked: advance coverage completed on time'
+            )
+            AND (
+              EXISTS (
+                SELECT 1 FROM collections actual
+                 WHERE actual.loan_id = marker.loan_id
+                   AND actual.collected_at::date = marker.collected_at::date
+                   AND actual.id <> marker.id
+                   AND NOT (
+                     actual.amount = 0 AND actual.note IN (
+                       'Auto-marked: installment covered by advance payment',
+                       'Auto-marked: advance coverage completed on time'
+                     )
+                   )
+              )
+              OR NOT EXISTS (
+                SELECT 1 FROM desired d
+                 WHERE d.id = marker.emi_id
+                   AND d.received_by_due >= d.cumulative_due - 0.01
+                   AND marker.type = CASE
+                     WHEN d.received_by_due > d.cumulative_due + 0.01
+                       THEN 'advance'::payment_type
+                     ELSE 'full'::payment_type
+                   END
+              )
+            )`,
+      );
+
+      const coverageEntries = await client.query<{ type: 'advance' | 'full' }>(
+        `WITH scheduled AS (
+           SELECT e.id, e.loan_id, e.due_date,
+                  sum(e.due_amount) OVER (
+                    PARTITION BY e.loan_id
+                    ORDER BY e.installment_no
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                  ) AS cumulative_due
+             FROM emi_schedule e
+             JOIN loans l ON l.id = e.loan_id AND l.status = 'active'
+         ),
+         covered AS (
+           SELECT s.*,
+                  COALESCE((
+                    SELECT sum(c.amount)
+                      FROM collections c
+                     WHERE c.loan_id = s.loan_id
+                       AND c.collected_at < s.due_date::timestamp + interval '1 day'
+                  ), 0) AS received_by_due
+             FROM scheduled s
+            WHERE s.due_date < CURRENT_DATE
+         )
+         INSERT INTO collections(loan_id, emi_id, amount, penalty, type, mode, note, reconciled_at, collected_at)
+         SELECT c.loan_id, c.id, 0, 0,
+                CASE WHEN c.received_by_due > c.cumulative_due + 0.01
+                     THEN 'advance'::payment_type
+                     ELSE 'full'::payment_type
+                END,
+                'cash',
+                CASE WHEN c.received_by_due > c.cumulative_due + 0.01
+                     THEN 'Auto-marked: installment covered by advance payment'
+                     ELSE 'Auto-marked: advance coverage completed on time'
+                END,
+                now(), c.due_date::timestamp + interval '23 hours 59 minutes'
+           FROM covered c
+          WHERE c.received_by_due >= c.cumulative_due - 0.01
+            AND NOT EXISTS (
+              SELECT 1 FROM collections existing
+               WHERE existing.loan_id = c.loan_id
+                 AND existing.collected_at::date = c.due_date
+            )
+         RETURNING type`,
+      );
+      const advanceEntries = coverageEntries.rows.filter((row) => row.type === 'advance').length;
+      const onTimeEntries = coverageEntries.rows.filter((row) => row.type === 'full').length;
+      logger.debug(
+        { advanceEntries, onTimeEntries },
+        'Sweep: advance-covered statement entries inserted',
+      );
 
       // Idempotent penalty recalculation: compute what each EMI's missed_penalty
       // SHOULD be based on the current streak state (1st miss free, 2nd+
@@ -110,6 +238,8 @@ export async function sweepMissedEmis(): Promise<{ missedMarked: number; penaliz
         missedMarked: (inserted.rowCount ?? 0) + (marked.rowCount ?? 0),
         penalized: penalized.rowCount ?? 0,
         advancesMatured: matured.rowCount ?? 0,
+        advanceEntries,
+        onTimeEntries,
       };
     });
   } catch (err) {
@@ -127,7 +257,13 @@ export function startMissedEmiJob(): NodeJS.Timeout {
   const tick = async () => {
     try {
       const result = await sweepMissedEmis();
-      if (result.missedMarked > 0 || result.penalized > 0 || result.advancesMatured > 0) {
+      if (
+        result.missedMarked > 0 ||
+        result.penalized > 0 ||
+        result.advancesMatured > 0 ||
+        result.advanceEntries > 0 ||
+        result.onTimeEntries > 0
+      ) {
         logger.info(result, 'Missed-EMI sweep applied changes');
       }
     } catch {
