@@ -96,10 +96,16 @@ function sortDue(rows: Due[], sort: SortKey): Due[] {
   return [...rows].sort(cmp[sort]);
 }
 
+function localToday(): string {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  return now.toISOString().slice(0, 10);
+}
+
 export default function CollectionsPage() {
   const qc = useQueryClient();
-  const { can } = useAuth();
-  const [manual, setManual] = useState({ amount: '', mode: 'cash' });
+  const { can, user } = useAuth();
+  const [manual, setManual] = useState({ amount: '', mode: 'cash', collectedDate: localToday() });
   const [search, setSearch] = useState('');
   const [selectedLoan, setSelectedLoan] = useState<LoanSearchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -129,7 +135,7 @@ export default function CollectionsPage() {
     mutationFn: (body: unknown) => apiPost('/collections', body),
     onSuccess: () => {
       setError(null);
-      setManual({ amount: '', mode: 'cash' });
+      setManual({ amount: '', mode: 'cash', collectedDate: localToday() });
       setSearch('');
       setSelectedLoan(null);
       return invalidate();
@@ -197,6 +203,7 @@ export default function CollectionsPage() {
                   amount: 0,
                   mode: 'cash',
                   type: 'missed',
+                  ...(user?.role === 'admin' ? { collectedDate: manual.collectedDate } : {}),
                 });
                 return;
               }
@@ -210,6 +217,7 @@ export default function CollectionsPage() {
                 emiId: selectedLoan.next_emi?.id ?? null,
                 amount: Number(manual.amount),
                 mode: manual.mode,
+                ...(user?.role === 'admin' ? { collectedDate: manual.collectedDate } : {}),
               });
             }}
           >
@@ -272,7 +280,7 @@ export default function CollectionsPage() {
                 <div className="mt-1 font-medium">Loan remaining balance: {money(selectedLoan.loan_remaining)}</div>
               </div>
             )}
-            <div className="grid gap-3 md:grid-cols-[1fr_180px_auto]">
+            <div className={`grid gap-3 ${user?.role === 'admin' ? 'md:grid-cols-[1fr_180px_180px_auto]' : 'md:grid-cols-[1fr_180px_auto]'}`}>
             <Input
               type="number"
               placeholder={manual.mode === 'missed' ? 'No amount — marking day as missed' : 'Amount'}
@@ -283,6 +291,18 @@ export default function CollectionsPage() {
               required={manual.mode !== 'missed'}
             />
             <select className="h-10 rounded-md border bg-background px-3 text-sm" value={manual.mode} onChange={(e) => setManual({ ...manual, mode: e.target.value })}><option value="cash">Cash</option><option value="bank_transfer">UPI/Bank</option><option value="missed">Missed</option></select>
+            {user?.role === 'admin' && (
+              <label className="relative">
+                <span className="absolute -top-2 left-2 z-10 bg-card px-1 text-[10px] font-semibold text-muted-foreground">Entry date</span>
+                <Input
+                  type="date"
+                  aria-label="Entry date"
+                  value={manual.collectedDate}
+                  onChange={(e) => setManual({ ...manual, collectedDate: e.target.value })}
+                  required
+                />
+              </label>
+            )}
             <Button disabled={record.isPending} variant={manual.mode === 'missed' ? 'danger' : 'default'}>
               {record.isPending ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving...</>
                 : manual.mode === 'missed' ? <><XCircle className="h-4 w-4" /> Mark Missed</>

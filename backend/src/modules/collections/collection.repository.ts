@@ -132,8 +132,12 @@ export const collectionRepository = {
     client: PoolClient,
   ) {
     const { rows } = await client.query<{ id: string }>(
-      `INSERT INTO collections(loan_id, emi_id, agent_id, amount, penalty, type, mode, note, created_by, reconciled_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, CASE WHEN $10 THEN now() ELSE NULL END)
+      `INSERT INTO collections(loan_id, emi_id, agent_id, amount, penalty, type, mode, note, created_by, reconciled_at, collected_at)
+       VALUES (
+         $1,$2,$3,$4,$5,$6,$7,$8,$9,
+         CASE WHEN $10 THEN now() ELSE NULL END,
+         CASE WHEN $11::date IS NULL THEN now() ELSE ($11::date + LOCALTIME)::timestamptz END
+       )
        RETURNING id`,
       [
         input.loanId,
@@ -146,6 +150,7 @@ export const collectionRepository = {
         input.note ?? null,
         input.createdBy,
         input.reconciledImmediately ?? false,
+        input.collectedDate ?? null,
       ],
     );
     return rows[0];

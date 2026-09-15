@@ -15,6 +15,9 @@ export const collectionService = {
       const loan = await loanRepository.lockForUpdate(input.loanId, client);
       if (!loan) throw BadRequest('Loan not found');
       if (loan.status !== 'active') throw BadRequest('Collections can be recorded only for active loans');
+      if (input.collectedDate && actorRole !== 'admin') {
+        throw BadRequest('Only an admin can select a collection entry date');
+      }
 
       // Area routing: a collection agent may only record entries for loans of
       // customers inside their assigned area(s). Admin/manager are exempt.
@@ -53,17 +56,24 @@ export const collectionService = {
       }
 
       // Strict one-entry-per-day rule: any entry (payment or missed marker)
-      // already recorded today blocks a second one — the next entry can only
-      // be made tomorrow. Also the backstop against accidental double-taps.
+      // already recorded on the target date blocks a second one. Admins can
+      // choose that date; every other role is fixed to the database's today.
+      // This is also the backstop against accidental double-taps.
       // The loan row lock above serializes concurrent attempts, so two
       // simultaneous requests can't both pass this check.
-      const { rows: todays } = await client.query<{ type: string }>(
-        `SELECT type FROM collections WHERE loan_id = $1 AND collected_at::date = CURRENT_DATE LIMIT 1`,
-        [input.loanId],
+      const { rows: entriesOnDate } = await client.query<{ type: string }>(
+        `SELECT type FROM collections
+          WHERE loan_id = $1
+            AND collected_at::date = COALESCE($2::date, CURRENT_DATE)
+          LIMIT 1`,
+        [input.loanId, input.collectedDate ?? null],
       );
-      if (todays[0]) {
+      if (entriesOnDate[0]) {
+        if (input.collectedDate) {
+          throw BadRequest('This loan already has an entry available on the selected date.');
+        }
         throw BadRequest(
-          todays[0].type === 'missed'
+          entriesOnDate[0].type === 'missed'
             ? "This loan is already marked missed for today. Only one entry per day is allowed — record the next entry tomorrow."
             : "Today's collection for this loan is already recorded. Only one entry per day is allowed — record the next entry tomorrow.",
         );
@@ -84,7 +94,12 @@ export const collectionService = {
             action: 'CREATE',
             entity: 'collection',
             entityId: collection.id,
-            meta: { loanId: input.loanId, type: 'missed', emiId: input.emiId },
+            meta: {
+              loanId: input.loanId,
+              type: 'missed',
+              emiId: input.emiId,
+              collectedDate: input.collectedDate ?? null,
+            },
             ip,
           },
           client,
@@ -138,6 +153,7 @@ export const collectionService = {
           referenceId: collection.id,
           description: `Collection for ${loan.loan_number}`,
           createdBy: actorId,
+          txnDate: input.collectedDate ?? null,
         });
       }
 
@@ -147,7 +163,14 @@ export const collectionService = {
           action: 'CREATE',
           entity: 'collection',
           entityId: collection.id,
-          meta: { loanId: input.loanId, amount: input.amount, penalty: input.penalty, mode: input.mode, type },
+          meta: {
+            loanId: input.loanId,
+            amount: input.amount,
+            penalty: input.penalty,
+            mode: input.mode,
+            type,
+            collectedDate: input.collectedDate ?? null,
+          },
           ip,
         },
         client,

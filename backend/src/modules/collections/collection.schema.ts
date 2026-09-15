@@ -9,6 +9,10 @@ export const createCollectionSchema = z
     type: z.enum(['full', 'partial', 'advance', 'missed']).default('full'),
     mode: z.enum(['cash', 'upi', 'bank_transfer']).default('cash'),
     note: z.string().optional().nullable(),
+    collectedDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
+      .optional(),
   })
   .refine((v) => (v.type === 'missed' ? v.amount === 0 && !!v.emiId : v.amount > 0), {
     message: 'Missed entries need an EMI and zero amount; money entries need a positive amount',
