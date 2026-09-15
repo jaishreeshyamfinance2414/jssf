@@ -183,9 +183,9 @@ export async function sweepMissedEmis(): Promise<{
       );
 
       // Idempotent penalty recalculation: compute what each EMI's missed_penalty
-      // SHOULD be based on the current streak state (1st miss free, 2nd+
-      // consecutive miss penalized), compare with current value, update diffs,
-      // and adjust loans.total_payable by the net delta per loan.
+      // SHOULD be based on the current streak state (first 3 consecutive
+      // misses free, 4th+ penalized), compare with the current value, update
+      // diffs, and adjust loans.total_payable by the net delta per loan.
       const penalized = await client.query(
         `WITH pen AS (
            SELECT COALESCE((value->>'per_day_pct')::numeric, 0) AS pct FROM settings WHERE key = 'penalty'
@@ -193,12 +193,12 @@ export async function sweepMissedEmis(): Promise<{
          target AS (
            SELECT e.id, e.loan_id, e.missed_penalty AS old_penalty,
                   CASE
-                    WHEN e.status = 'missed' AND pen.pct > 0 AND EXISTS (
-                      SELECT 1 FROM emi_schedule prev
+                    WHEN e.status = 'missed' AND pen.pct > 0 AND (
+                      SELECT count(*) FROM emi_schedule prev
                        WHERE prev.loan_id = e.loan_id
-                         AND prev.installment_no = e.installment_no - 1
+                         AND prev.installment_no BETWEEN e.installment_no - 3 AND e.installment_no - 1
                          AND prev.status = 'missed'
-                    ) THEN round(l.principal * pen.pct / 100, 2)
+                    ) = 3 THEN round(l.principal * pen.pct / 100, 2)
                     ELSE 0
                   END AS new_penalty
              FROM emi_schedule e

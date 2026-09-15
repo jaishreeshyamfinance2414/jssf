@@ -201,10 +201,9 @@ export const collectionRepository = {
    * total payable. The EMI's due_amount is NOT touched — payments always fill
    * base EMI days, and the penalty is recovered via the loan total instead.
    *
-   * Grace rule: the FIRST miss of a streak is free — penalty applies only
-   * from the 2nd consecutive missed day (previous installment also missed).
-   * Paying a day resets the streak. missed_penalty=0 guard keeps the accrual
-   * once-only per EMI.
+   * Grace rule: the first THREE misses of a streak are free — penalty applies
+   * from the 4th consecutive missed installment. Paying an installment resets
+   * the streak. missed_penalty=0 keeps the accrual once-only per EMI.
    */
   async markEmiMissed(emiId: string, client: PoolClient) {
     await client.query(
@@ -221,12 +220,12 @@ export const collectionRepository = {
            FROM pen, loans l
           WHERE e.id = $1 AND l.id = e.loan_id
             AND e.status = 'missed' AND e.missed_penalty = 0 AND pen.pct > 0
-            AND EXISTS (
-              SELECT 1 FROM emi_schedule prev
+            AND (
+              SELECT count(*) FROM emi_schedule prev
                WHERE prev.loan_id = e.loan_id
-                 AND prev.installment_no = e.installment_no - 1
+                 AND prev.installment_no BETWEEN e.installment_no - 3 AND e.installment_no - 1
                  AND prev.status = 'missed'
-            )
+            ) = 3
           RETURNING e.loan_id, e.missed_penalty
        )
        UPDATE loans l
