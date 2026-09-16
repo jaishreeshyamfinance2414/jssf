@@ -1,6 +1,7 @@
 import { PoolClient } from 'pg';
 import { query } from '../../db/pool';
 import { CreateCollectionBody } from './collection.schema';
+import { reconcileHistory, reconcileHistoricalPenalties } from './statement-history';
 
 export const collectionRepository = {
   /**
@@ -277,139 +278,13 @@ export const collectionRepository = {
   /**
    * Immediately reconcile past derived statement rows after a payment changes.
    * Covered missed rows become Advance/Full, existing automatic coverage rows
-   * change classification, and automatic rows that are no longer funded are
-   * removed. Missing covered dates are materialized in the same transaction.
+   * change classification using receipts available on each date. Rows no
+   * longer covered become Missed; missing elapsed dates are materialized.
    */
-  async reconcileStatementCoverage(loanId: string | null, client: PoolClient) {
-    const loanFilter = loanId ? 'AND l.id = $1' : '';
-    const collectionFilter = loanId ? 'WHERE c.loan_id = $1' : '';
-    const params = loanId ? [loanId] : [];
-    const { rows } = await client.query<{ advance_entries: number; on_time_entries: number }>(
-      `WITH collection_totals AS MATERIALIZED (
-         SELECT c.loan_id, sum(c.amount) AS total_received
-           FROM collections c
-           ${collectionFilter}
-          GROUP BY c.loan_id
-       ),
-       scheduled AS MATERIALIZED (
-         SELECT e.id, e.loan_id, e.due_date,
-                sum(e.due_amount) OVER (
-                  PARTITION BY e.loan_id
-                  ORDER BY e.installment_no
-                  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                ) AS cumulative_due,
-                COALESCE(t.total_received, 0) AS total_received
-           FROM emi_schedule e
-           JOIN loans l ON l.id = e.loan_id AND l.status = 'active' ${loanFilter}
-           LEFT JOIN collection_totals t ON t.loan_id = e.loan_id
-       ),
-       desired AS MATERIALIZED (
-         SELECT s.*,
-                CASE WHEN s.total_received > s.cumulative_due + 0.01
-                     THEN 'advance'::payment_type ELSE 'full'::payment_type END AS desired_type
-           FROM scheduled s
-          WHERE s.due_date < CURRENT_DATE
-            AND s.total_received >= s.cumulative_due - 0.01
-       ),
-       converted AS (
-         UPDATE collections entry
-            SET type = d.desired_type,
-                note = CASE
-                  WHEN entry.created_by IS NULL AND d.desired_type = 'advance'
-                    THEN 'Auto-marked: installment covered by advance payment'
-                  WHEN entry.created_by IS NULL
-                    THEN 'Auto-marked: advance coverage completed on time'
-                  ELSE entry.note
-                END
-           FROM desired d
-          WHERE entry.loan_id = d.loan_id
-            AND entry.emi_id = d.id
-            AND entry.amount = 0
-            AND (
-              entry.type = 'missed'
-              OR entry.note IN (
-                'Auto-marked: installment covered by advance payment',
-                'Auto-marked: advance coverage completed on time'
-              )
-            )
-            AND NOT EXISTS (
-              SELECT 1 FROM collections actual
-               WHERE actual.loan_id = entry.loan_id
-                 AND actual.collected_at >= entry.collected_at::date
-                 AND actual.collected_at < entry.collected_at::date + interval '1 day'
-                 AND actual.id <> entry.id
-                 AND NOT (
-                   actual.amount = 0 AND actual.note IN (
-                     'Auto-marked: installment covered by advance payment',
-                     'Auto-marked: advance coverage completed on time'
-                   )
-                 )
-            )
-          RETURNING entry.id
-       ),
-       removed AS (
-         DELETE FROM collections marker
-          WHERE marker.amount = 0
-            AND EXISTS (
-              SELECT 1 FROM loans active_loan
-               WHERE active_loan.id = marker.loan_id
-                 AND active_loan.status = 'active'
-            )
-            AND marker.note IN (
-              'Auto-marked: installment covered by advance payment',
-              'Auto-marked: advance coverage completed on time'
-            )
-            AND ${loanId ? 'marker.loan_id = $1' : 'TRUE'}
-            AND (
-              NOT EXISTS (SELECT 1 FROM desired d WHERE d.id = marker.emi_id)
-              OR EXISTS (
-                SELECT 1 FROM collections actual
-                 WHERE actual.loan_id = marker.loan_id
-                   AND actual.collected_at >= marker.collected_at::date
-                   AND actual.collected_at < marker.collected_at::date + interval '1 day'
-                   AND actual.id <> marker.id
-                   AND NOT (
-                     actual.amount = 0 AND actual.note IN (
-                       'Auto-marked: installment covered by advance payment',
-                       'Auto-marked: advance coverage completed on time'
-                     )
-                   )
-              )
-            )
-          RETURNING marker.id
-       ),
-       added AS (
-         INSERT INTO collections(
-           loan_id, emi_id, amount, penalty, type, mode, note, reconciled_at, collected_at
-         )
-         SELECT d.loan_id, d.id, 0, 0, d.desired_type, 'cash',
-                CASE WHEN d.desired_type = 'advance'
-                     THEN 'Auto-marked: installment covered by advance payment'
-                     ELSE 'Auto-marked: advance coverage completed on time' END,
-                now(), d.due_date::timestamp + interval '23 hours 59 minutes'
-           FROM desired d
-          WHERE NOT EXISTS (
-                  SELECT 1 FROM statement_entry_suppressions suppressed
-                   WHERE suppressed.emi_id = d.id
-                )
-            AND NOT EXISTS (
-                  SELECT 1 FROM collections existing
-                   WHERE existing.loan_id = d.loan_id
-                     AND existing.collected_at >= d.due_date::timestamp
-                     AND existing.collected_at < d.due_date::timestamp + interval '1 day'
-                )
-          RETURNING type
-       )
-       SELECT count(*) FILTER (WHERE type = 'advance')::int AS advance_entries,
-              count(*) FILTER (WHERE type = 'full')::int AS on_time_entries
-         FROM added`,
-      params,
-    );
-
-    return {
-      advanceEntries: rows[0]?.advance_entries ?? 0,
-      onTimeEntries: rows[0]?.on_time_entries ?? 0,
-    };
+  async reconcileStatementCoverage(loanId: string | null, client: PoolClient, deletedAt?: Date | string) {
+    const result = await reconcileHistory(loanId, client, deletedAt);
+    await reconcileHistoricalPenalties(loanId, client);
+    return result;
   },
 
   /**

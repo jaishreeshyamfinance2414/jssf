@@ -88,6 +88,7 @@ export const collectionService = {
           client,
         );
         await collectionRepository.markEmiMissed(input.emiId!, client);
+        await collectionRepository.reconcileStatementCoverage(input.loanId, client);
         await audit(
           {
             actorId,
@@ -252,7 +253,8 @@ export const collectionService = {
           penalty: newPenalty,
           type: newType,
           collectedAt,
-          takeOwnership: wasAutomaticCoverageMarker ? { actorId } : undefined,
+          takeOwnership: wasAutomaticCoverageMarker || (isConvertingToPaid && !collection.created_by)
+            ? { actorId } : undefined,
         },
         client,
       );
@@ -395,7 +397,8 @@ export const collectionService = {
       }
 
       await collectionRepository.rebuildEmiState(collection.loan_id, client);
-      await collectionRepository.reconcileStatementCoverage(collection.loan_id, client);
+      // Keep the deleted date available for an admin's replacement entry.
+      await collectionRepository.reconcileStatementCoverage(collection.loan_id, client, collection.collected_at);
 
       // If this collection had auto-closed the loan (closed_by stays NULL for
       // markClosedIfFullyPaid closures), reopen it.
@@ -436,19 +439,21 @@ function isAutomaticCoverageMarker(collection: { amount: string | number; type: 
     ].includes(collection.note ?? '');
 }
 
-/** full = exactly the anchor EMI's remaining due, advance = more, partial = less. */
+/** Advance means ahead of the cumulative schedule on the effective payment date. */
 async function classifyPayment(
   input: CreateCollectionBody,
   client: import('pg').PoolClient,
 ): Promise<'full' | 'partial' | 'advance'> {
-  if (!input.emiId) return 'advance';
-  const { rows } = await client.query<{ due_amount: string; paid_amount: string }>(
-    `SELECT due_amount::text, paid_amount::text FROM emi_schedule WHERE id = $1`,
-    [input.emiId],
+  const { rows } = await client.query<{ expected: string; received: string; installment: string }>(
+    `SELECT COALESCE((SELECT sum(due_amount) FROM emi_schedule
+                       WHERE loan_id = $1 AND due_date <= COALESCE($2::date, CURRENT_DATE)),0)::text AS expected,
+            COALESCE((SELECT sum(amount) FROM collections WHERE loan_id = $1
+                       AND collected_at < COALESCE($2::date, CURRENT_DATE)::timestamp + interval '1 day'),0)::text AS received,
+            emi_amount::text AS installment FROM loans WHERE id = $1`,
+    [input.loanId, input.collectedDate ?? null],
   );
   if (!rows[0]) return 'advance';
-  const emiRemaining = Number(rows[0].due_amount) - Number(rows[0].paid_amount);
-  if (input.amount > emiRemaining + 0.01) return 'advance';
-  if (input.amount >= emiRemaining - 0.01) return 'full';
+  if (Number(rows[0].received) + input.amount > Number(rows[0].expected) + 0.01) return 'advance';
+  if (input.amount >= Number(rows[0].installment) - 0.01) return 'full';
   return 'partial';
 }
