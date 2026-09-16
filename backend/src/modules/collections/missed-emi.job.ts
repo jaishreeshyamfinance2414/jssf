@@ -1,5 +1,6 @@
 import { logger } from '../../config/logger';
 import { withTransaction } from '../../db/pool';
+import { collectionRepository } from './collection.repository';
 
 /**
  * Daily-entry guarantee: every active loan must have an entry for every EMI
@@ -35,6 +36,51 @@ export async function sweepMissedEmis(): Promise<{
       // instead of hanging the entire server.
       await client.query('SET LOCAL statement_timeout = 30000');
 
+      // `running` protects one Node process. This transaction-level lock also
+      // prevents two deployed API instances/manual sweeps from writing the
+      // same statement dates concurrently.
+      const { rows: sweepLock } = await client.query<{ acquired: boolean }>(
+        `SELECT pg_try_advisory_xact_lock(742019017) AS acquired`,
+      );
+      if (!sweepLock[0]?.acquired) {
+        logger.warn('Sweep already running in another process — skipping duplicate invocation');
+        return { missedMarked: 0, penalized: 0, advancesMatured: 0, advanceEntries: 0, onTimeEntries: 0 };
+      }
+
+      // Repair any stale EMI state first. This is essential for older loans
+      // corrected before statement reconciliation existed; otherwise the
+      // penalty phase can still see a covered installment as Missed.
+      await collectionRepository.rebuildAllActiveEmiStates(client);
+
+      // Repair duplicates produced by older sweep code, but only when the row
+      // being removed is a zero-value system row and a real/manual entry exists
+      // for the same loan and business date. Never delete a money entry here.
+      const duplicateAutomaticEntries = await client.query(
+        `DELETE FROM collections generated
+          USING collections actual
+          WHERE generated.id <> actual.id
+            AND generated.loan_id = actual.loan_id
+            AND generated.amount = 0
+            AND generated.created_by IS NULL
+            AND generated.note IN (
+              'Auto-marked: no collection recorded for this day',
+              'Auto-marked: installment covered by advance payment',
+              'Auto-marked: advance coverage completed on time'
+            )
+            AND actual.collected_at >= generated.collected_at::date
+            AND actual.collected_at < generated.collected_at::date + interval '1 day'
+            AND NOT (
+              actual.amount = 0
+              AND actual.created_by IS NULL
+              AND actual.note IN (
+                'Auto-marked: no collection recorded for this day',
+                'Auto-marked: installment covered by advance payment',
+                'Auto-marked: advance coverage completed on time'
+              )
+            )`,
+      );
+      logger.debug({ rows: duplicateAutomaticEntries.rowCount }, 'Sweep: duplicate automatic entries removed');
+
       const inserted = await client.query(
         `INSERT INTO collections(loan_id, emi_id, amount, penalty, type, mode, note, reconciled_at, collected_at)
          SELECT e.loan_id, e.id, 0, 0, 'missed', 'cash',
@@ -45,7 +91,13 @@ export async function sweepMissedEmis(): Promise<{
           WHERE e.due_date < CURRENT_DATE
             AND e.paid_amount < e.due_amount
             AND e.status IN ('pending', 'partial', 'missed')
-            AND NOT EXISTS (SELECT 1 FROM collections c WHERE c.emi_id = e.id)`,
+            AND NOT EXISTS (SELECT 1 FROM collections c WHERE c.emi_id = e.id)
+            AND NOT EXISTS (
+              SELECT 1 FROM collections same_day
+               WHERE same_day.loan_id = e.loan_id
+                 AND same_day.collected_at >= e.due_date::timestamp
+                 AND same_day.collected_at < e.due_date::timestamp + interval '1 day'
+            )`,
       );
       logger.debug({ rows: inserted.rowCount }, 'Sweep: missed entries inserted');
 
@@ -60,151 +112,11 @@ export async function sweepMissedEmis(): Promise<{
       );
       logger.debug({ rows: marked.rowCount }, 'Sweep: EMIs marked missed');
 
-      // Materialize statement rows for installments that are fully funded by
-      // the loan's current collected total. This deliberately recalculates old
-      // missed days after an admin corrects/deletes an entry or records a
-      // larger advance payment:
-      //
-      //   received > cumulative due  -> this day was covered in advance
-      //   received = cumulative due  -> this is the final covered, on-time day
-      //
-      // A real collection made on the due date always wins; in that case no
-      // synthetic row is added. Existing zero-value missed rows are converted
-      // below so they no longer block the corrected advance classification.
-      // First discard derived rows that became stale after an admin corrected
-      // an older payment amount/date. The insert below rebuilds the right row
-      // in the same transaction when only its Advance/Full classification
-      // changed.
-      await client.query(
-        `WITH scheduled AS (
-           SELECT e.id, e.loan_id,
-                  sum(e.due_amount) OVER (
-                    PARTITION BY e.loan_id
-                    ORDER BY e.installment_no
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                  ) AS cumulative_due
-             FROM emi_schedule e
-             JOIN loans l ON l.id = e.loan_id AND l.status = 'active'
-            WHERE e.due_date < CURRENT_DATE
-         ),
-         covered AS (
-           SELECT s.*,
-                  COALESCE((SELECT sum(c.amount) FROM collections c WHERE c.loan_id = s.loan_id), 0) AS total_received
-             FROM scheduled s
-         )
-         UPDATE collections entry
-            SET type = CASE WHEN c.total_received > c.cumulative_due + 0.01
-                            THEN 'advance'::payment_type ELSE 'full'::payment_type END,
-                note = CASE
-                  WHEN entry.created_by IS NULL AND c.total_received > c.cumulative_due + 0.01
-                    THEN 'Auto-marked: installment covered by advance payment'
-                  WHEN entry.created_by IS NULL
-                    THEN 'Auto-marked: advance coverage completed on time'
-                  ELSE entry.note
-                END
-           FROM covered c
-          WHERE entry.emi_id = c.id
-            AND entry.amount = 0
-            AND entry.type = 'missed'
-            AND c.total_received >= c.cumulative_due - 0.01`,
-      );
-
-      await client.query(
-        `WITH scheduled AS (
-           SELECT e.id, e.loan_id, e.due_date,
-                  sum(e.due_amount) OVER (
-                    PARTITION BY e.loan_id
-                    ORDER BY e.installment_no
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                  ) AS cumulative_due
-             FROM emi_schedule e
-             JOIN loans l ON l.id = e.loan_id AND l.status = 'active'
-         ),
-         desired AS (
-           SELECT s.*,
-                  COALESCE((SELECT sum(c.amount) FROM collections c WHERE c.loan_id = s.loan_id), 0) AS total_received
-             FROM scheduled s
-            WHERE s.due_date < CURRENT_DATE
-         )
-         DELETE FROM collections marker
-          USING loans l
-          WHERE marker.loan_id = l.id
-            AND l.status = 'active'
-            AND marker.amount = 0
-            AND marker.note IN (
-              'Auto-marked: installment covered by advance payment',
-              'Auto-marked: advance coverage completed on time'
-            )
-            AND (
-              EXISTS (
-                SELECT 1 FROM collections actual
-                 WHERE actual.loan_id = marker.loan_id
-                   AND actual.collected_at::date = marker.collected_at::date
-                   AND actual.id <> marker.id
-                   AND NOT (
-                     actual.amount = 0 AND actual.note IN (
-                       'Auto-marked: installment covered by advance payment',
-                       'Auto-marked: advance coverage completed on time'
-                     )
-                   )
-              )
-              OR NOT EXISTS (
-                SELECT 1 FROM desired d
-                 WHERE d.id = marker.emi_id
-                   AND d.total_received >= d.cumulative_due - 0.01
-                   AND marker.type = CASE
-                     WHEN d.total_received > d.cumulative_due + 0.01
-                       THEN 'advance'::payment_type
-                     ELSE 'full'::payment_type
-                   END
-              )
-            )`,
-      );
-
-      const coverageEntries = await client.query<{ type: 'advance' | 'full' }>(
-        `WITH scheduled AS (
-           SELECT e.id, e.loan_id, e.due_date,
-                  sum(e.due_amount) OVER (
-                    PARTITION BY e.loan_id
-                    ORDER BY e.installment_no
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                  ) AS cumulative_due
-             FROM emi_schedule e
-             JOIN loans l ON l.id = e.loan_id AND l.status = 'active'
-         ),
-         covered AS (
-           SELECT s.*,
-                  COALESCE((SELECT sum(c.amount) FROM collections c WHERE c.loan_id = s.loan_id), 0) AS total_received
-             FROM scheduled s
-            WHERE s.due_date < CURRENT_DATE
-         )
-         INSERT INTO collections(loan_id, emi_id, amount, penalty, type, mode, note, reconciled_at, collected_at)
-         SELECT c.loan_id, c.id, 0, 0,
-                CASE WHEN c.total_received > c.cumulative_due + 0.01
-                     THEN 'advance'::payment_type
-                     ELSE 'full'::payment_type
-                END,
-                'cash',
-                CASE WHEN c.total_received > c.cumulative_due + 0.01
-                     THEN 'Auto-marked: installment covered by advance payment'
-                     ELSE 'Auto-marked: advance coverage completed on time'
-                END,
-                now(), c.due_date::timestamp + interval '23 hours 59 minutes'
-           FROM covered c
-          WHERE c.total_received >= c.cumulative_due - 0.01
-            AND NOT EXISTS (
-              SELECT 1 FROM statement_entry_suppressions suppressed
-               WHERE suppressed.emi_id = c.id
-            )
-            AND NOT EXISTS (
-              SELECT 1 FROM collections existing
-               WHERE existing.loan_id = c.loan_id
-                 AND existing.collected_at::date = c.due_date
-            )
-         RETURNING type`,
-      );
-      const advanceEntries = coverageEntries.rows.filter((row) => row.type === 'advance').length;
-      const onTimeEntries = coverageEntries.rows.filter((row) => row.type === 'full').length;
+      // One aggregated pass reconciles every past statement day. It converts
+      // old Missed rows, updates stale Advance/On-time classifications, and
+      // materializes missing covered days without an N-per-EMI total query.
+      const { advanceEntries, onTimeEntries } =
+        await collectionRepository.reconcileStatementCoverage(null, client);
       logger.debug(
         { advanceEntries, onTimeEntries },
         'Sweep: advance-covered statement entries inserted',
@@ -218,19 +130,27 @@ export async function sweepMissedEmis(): Promise<{
         `WITH pen AS (
            SELECT COALESCE((value->>'per_day_pct')::numeric, 0) AS pct FROM settings WHERE key = 'penalty'
          ),
+         ordered AS MATERIALIZED (
+           SELECT e.id, e.loan_id, e.status, e.missed_penalty,
+                  lag(e.status, 1) OVER w AS previous_1,
+                  lag(e.status, 2) OVER w AS previous_2,
+                  lag(e.status, 3) OVER w AS previous_3
+             FROM emi_schedule e
+             JOIN loans active_loan ON active_loan.id = e.loan_id AND active_loan.status = 'active'
+           WINDOW w AS (PARTITION BY e.loan_id ORDER BY e.installment_no)
+         ),
          target AS (
            SELECT e.id, e.loan_id, e.missed_penalty AS old_penalty,
                   CASE
-                    WHEN e.status = 'missed' AND pen.pct > 0 AND (
-                      SELECT count(*) FROM emi_schedule prev
-                       WHERE prev.loan_id = e.loan_id
-                         AND prev.installment_no BETWEEN e.installment_no - 3 AND e.installment_no - 1
-                         AND prev.status = 'missed'
-                    ) = 3 THEN round(l.principal * pen.pct / 100, 2)
+                    WHEN e.status = 'missed' AND pen.pct > 0
+                         AND e.previous_1 = 'missed'
+                         AND e.previous_2 = 'missed'
+                         AND e.previous_3 = 'missed'
+                      THEN round(l.principal * pen.pct / 100, 2)
                     ELSE 0
                   END AS new_penalty
-             FROM emi_schedule e
-             JOIN loans l ON l.id = e.loan_id AND l.status = 'active'
+             FROM ordered e
+             JOIN loans l ON l.id = e.loan_id
              CROSS JOIN pen
          ),
          diff AS (

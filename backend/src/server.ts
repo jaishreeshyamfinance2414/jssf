@@ -3,11 +3,16 @@ import { env } from './config/env';
 import { logger } from './config/logger';
 import { pool } from './db/pool';
 import { startMissedEmiJob } from './modules/collections/missed-emi.job';
+import { collectionRepository } from './modules/collections/collection.repository';
 
 async function bootstrap() {
   // Verify DB connectivity before accepting traffic — fail fast.
   await pool.query('SELECT 1');
   logger.info('Database connection OK');
+
+  // The sweep starts immediately, so its small supporting table must exist
+  // before the first run even when a deployment omitted `npm run migrate`.
+  await collectionRepository.ensureStatementInfrastructure();
 
   startMissedEmiJob();
 
