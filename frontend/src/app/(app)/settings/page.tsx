@@ -169,7 +169,7 @@ export default function SettingsPage() {
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
               The penalty sweep runs automatically every hour. Use this button to trigger it instantly — it will mark
-              uncovered days as missed and apply one daily penalty when scheduled EMI dues plus previously accrued penalties minus all receipts through that date exceeds 3 EMIs. Daily checks continue after maturity until full settlement or manual closure; no extra EMI debt is added.
+              completed uncovered days as missed and apply one daily penalty only after the collection day ends, when scheduled EMI dues plus previously accrued penalties minus all receipts through that date exceeds 3 EMIs. Today's open day is never charged. Daily checks continue after maturity until full settlement or manual closure; no extra EMI debt is added.
             </p>
             <Button onClick={runSweep} disabled={sweeping}>
               {sweeping ? 'Running Sweep…' : 'Run Penalty Sweep Now'}

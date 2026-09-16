@@ -85,7 +85,8 @@ export const loanRepository = {
     const { rows } = await query(
       `SELECT l.*, c.full_name AS customer_name, c.mobile AS customer_mobile, c.area_id,
               a.name AS area_name, receipts.received AS received_till_today,
-              dues.expected AS expected_till_today, balance.shortfall AS due_till_today,
+              dues.total_payable AS total_payable,
+              dues.expected AS expected_till_today, balance.signed_shortfall AS due_till_today,
               balance.advance AS advance_balance, balance.remaining AS remaining,
               dues.penalty AS total_penalty, CURRENT_DATE::text AS business_date
          FROM loans l
@@ -107,7 +108,7 @@ export const loanRepository = {
   async list(status?: LoanStatus) {
     const { rows } = await query(
       `SELECT l.id, l.loan_number, l.principal, l.interest_rate, l.status, l.emi_frequency, l.tenure_count,
-              l.emi_amount, l.total_payable, l.loan_date, l.closed_at, l.waiver_amount, l.created_at,
+              l.emi_amount, dues.total_payable, l.loan_date, l.closed_at, l.waiver_amount, l.created_at,
               c.full_name AS customer_name, c.mobile AS customer_mobile,
               balance.remaining::text, dues.closing_date::text
          FROM loans l JOIN customers c ON c.id = l.customer_id
@@ -400,7 +401,8 @@ export const loanRepository = {
               e.installment_no, COALESCE(e.due_date,co.collected_at::date) AS due_date,
               e.due_amount, e.status AS emi_status,
               COALESCE((SELECT p.amount FROM loan_daily_penalties p
-                WHERE p.loan_id = co.loan_id AND p.penalty_date = co.collected_at::date),0) AS missed_penalty
+                WHERE p.loan_id = co.loan_id AND p.penalty_date = co.collected_at::date
+                  AND p.penalty_date < CURRENT_DATE),0) AS missed_penalty
          FROM collections co
          JOIN running r ON r.loan_id = co.loan_id AND r.day = co.collected_at::date
          LEFT JOIN users agent ON agent.id = co.agent_id

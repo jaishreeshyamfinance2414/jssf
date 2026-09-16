@@ -487,8 +487,8 @@ export default function LoansPage() {
                   <Metric label="Total Payable" value={money(summary.totalPayable)} />
                   <Metric label="Paid" value={money(summary.paid)} />
                   <Metric label="Remaining" value={money(summary.remaining)} />
-                  <Metric label="Expected Through Today" value={money(history.loan.expected_till_today)} />
-                  <Metric label="Shortfall Including Penalties" value={money(history.loan.due_till_today)} />
+                  <Metric label="Expected Till Today" value={money(history.loan.expected_till_today)} />
+                  <Metric label="Shortfall Till Today" value={money(history.loan.due_till_today)} />
                   <Metric label="Advance Balance" value={money(history.loan.advance_balance)} />
                   <Metric label="Penalty Added" value={money(summary.penalty)} />
                   <Metric label="Advance Payment" value={String(summary.advance)} />

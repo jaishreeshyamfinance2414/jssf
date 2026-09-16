@@ -95,7 +95,7 @@ export const reportsRepository = {
       [customerId],
     );
     const { rows: loans } = await query(
-      `SELECT l.id, l.loan_number, l.principal::text, l.total_payable::text, l.status,
+      `SELECT l.id, l.loan_number, l.principal::text, dues.total_payable::text, l.status,
               l.loan_date::text, l.emi_amount::text, l.emi_frequency, l.tenure_count,
               receipts.received::text AS paid, balance.remaining::text,
               dues.expected::text AS expected_till_today, balance.shortfall::text AS due_till_today

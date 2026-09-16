@@ -127,13 +127,13 @@ test('historical statement coverage, corrections and penalties', async () => {
       VALUES ($1,200,0,'full','cash',CURRENT_DATE::timestamp+interval '1 minute') RETURNING id`,[threshold])).rows[0].id;
     const penaltyToday = async () => Number((await db.query(`SELECT missed_penalty FROM emi_schedule
       WHERE loan_id=$1 AND due_date=CURRENT_DATE`,[threshold])).rows[0].missed_penalty);
-    for (const [amount, expected] of [[200,0],[200.01,0],[199.99,200],[199,200],[100,200],[800,0],[1000,0]]) {
+    for (const amount of [200,200.01,199.99,199,100,800,1000]) {
       await db.query('UPDATE collections SET amount=$2 WHERE id=$1',[receipt,amount]);
       await reconcileHistoricalPenalties(threshold,db);
-      assert.equal(await penaltyToday(), expected, `Receipt ${amount} against 800 due`);
-      assert.equal(Number((await db.query('SELECT total_payable FROM loans WHERE id=$1',[threshold])).rows[0].total_payable),24000+expected);
+      assert.equal(await penaltyToday(), 0, `Open day must not incur a penalty, receipt ${amount}`);
+      assert.equal(Number((await db.query('SELECT total_payable FROM loans WHERE id=$1',[threshold])).rows[0].total_payable),24000);
       await reconcileHistoricalPenalties(threshold,db);
-      assert.equal(await penaltyToday(),expected,'Repeated recalculation must not compound penalties');
+      assert.equal(await penaltyToday(),0,'Repeated recalculation must not charge an open day');
     }
     // Separate penalty receipts also reduce the combined shortfall.
     await db.query('UPDATE collections SET amount=0,penalty=200 WHERE id=$1',[receipt]);
@@ -142,9 +142,24 @@ test('historical statement coverage, corrections and penalties', async () => {
     // Deleting the receipt restores the shortfall, even without a missed marker.
     await db.query('DELETE FROM collections WHERE id=$1',[receipt]);
     await reconcileHistoricalPenalties(threshold,db);
-    assert.equal(await penaltyToday(),200);
+    assert.equal(await penaltyToday(),0);
     assert.equal(Number((await db.query(`SELECT sum(missed_penalty) AS n FROM emi_schedule
       WHERE loan_id=$1 AND due_date>CURRENT_DATE`,[threshold])).rows[0].n),0);
+
+    // The same boundary becomes chargeable only after the collection day ends.
+    const completedBoundary = (await db.query(`INSERT INTO loans(loan_number,customer_id,principal,duration_days,emi_amount,total_payable,status,loan_date)
+      VALUES ('COMPLETED-BOUNDARY',$1,20000,120,200,24000,'active',CURRENT_DATE-4) RETURNING id`,[customer])).rows[0].id;
+    await db.query(`INSERT INTO emi_schedule(loan_id,installment_no,due_date,due_amount)
+      SELECT $1,n,CURRENT_DATE-5+n,200 FROM generate_series(1,120)n`,[completedBoundary]);
+    const completedReceipt = (await db.query(`INSERT INTO collections(loan_id,amount,type,mode,collected_at)
+      VALUES ($1,200,'full','cash',(CURRENT_DATE-1)::timestamp+interval '23 hours 59 minutes') RETURNING id`,[completedBoundary])).rows[0].id;
+    for (const [amount, expected] of [[200,0],[200.01,0],[199.99,200],[199,200],[100,200],[800,0],[1000,0]]) {
+      await db.query('UPDATE collections SET amount=$2 WHERE id=$1',[completedReceipt,amount]);
+      await reconcileHistoricalPenalties(completedBoundary,db);
+      const charge = (await db.query(`SELECT missed_penalty FROM emi_schedule WHERE loan_id=$1 AND due_date=CURRENT_DATE-1`,[completedBoundary])).rows[0];
+      assert.equal(Number(charge.missed_penalty),expected, `Closed day: ${amount} received against 800 due`);
+      assert.equal(Number((await db.query('SELECT total_payable FROM loans WHERE id=$1',[completedBoundary])).rows[0].total_payable),24000+expected);
+    }
 
     // Exercise the actual hourly/manual sweep twice, including financial EMI
     // allocation. Its current-balance rebuild must not corrupt dated history.
@@ -178,6 +193,29 @@ test('historical statement coverage, corrections and penalties', async () => {
       assert.equal(Number(detail.expected_till_today),8200 + accrued);
       assert.equal(Number(detail.received_till_today),2200,'Future receipts excluded from current balance');
       assert.equal(Number(detail.due_till_today),6000 + accrued);
+      // Existing charges must be included even when their amounts did not change.
+      await db.query('UPDATE loans SET total_payable=24000 WHERE id=$1',[loan]);
+      assert.equal(Number((await loanRepository.findById(loan)).total_payable),24000+accrued);
+      await sweepMissedEmis();
+      assert.equal(Number((await db.query('SELECT total_payable FROM loans WHERE id=$1',[loan])).rows[0].total_payable),24000+accrued);
+      await db.query('UPDATE loans SET total_payable=99999 WHERE id=$1',[loan]);
+      await sweepMissedEmis();
+      assert.equal(Number((await db.query('SELECT total_payable FROM loans WHERE id=$1',[loan])).rows[0].total_payable),24000+accrued);
+      // Premature charges from the previous version must be hidden immediately
+      // and removed by reconciliation, including their schedule mirror.
+      await db.query(`INSERT INTO loan_daily_penalties(loan_id,penalty_date,amount)
+        VALUES ($1,CURRENT_DATE,200) ON CONFLICT (loan_id,penalty_date) DO UPDATE SET amount=200`,[loan]);
+      await db.query(`UPDATE emi_schedule SET missed_penalty=200 WHERE loan_id=$1 AND due_date=CURRENT_DATE`,[loan]);
+      await db.query('UPDATE loans SET total_payable=total_payable+200 WHERE id=$1',[loan]);
+      assert.equal(Number((await loanRepository.findById(loan)).total_penalty),accrued);
+      assert.equal(Number((await loanRepository.findById(loan)).total_payable),24000+accrued);
+      await sweepMissedEmis();
+      assert.equal(Number((await db.query(`SELECT count(*) AS n FROM loan_daily_penalties
+        WHERE loan_id=$1 AND penalty_date>=CURRENT_DATE`,[loan])).rows[0].n),0);
+      const currentEmi = (await db.query(`SELECT missed_penalty,status FROM emi_schedule WHERE loan_id=$1 AND due_date=CURRENT_DATE`,[loan])).rows[0];
+      assert.equal(Number(currentEmi.missed_penalty),0);
+      assert.equal(currentEmi.status,'pending');
+      assert.equal(Number((await db.query('SELECT total_payable FROM loans WHERE id=$1',[loan])).rows[0].total_payable),24000+accrued);
       assert.equal(Number((await db.query('SELECT sum(paid_amount) AS paid FROM emi_schedule WHERE loan_id=$1',[loan])).rows[0].paid),2200);
       const sheet = (await collectionRepository.sheet()).find(r=>r.loan_id===loan);
       assert.equal(Number(sheet.due_till_today),6000 + accrued);
@@ -188,7 +226,7 @@ test('historical statement coverage, corrections and penalties', async () => {
       const { dashboardRepository } = require('../dist/modules/dashboard/dashboard.repository');
       const { reportsRepository } = require('../dist/modules/reports/reports.repository');
       const report = (await reportsRepository.missedEmi()).find(r=>r.loan_number==='HISTORY');
-      assert.equal(Number(report.overdue_amount),5800 + accrued - 200);
+      assert.equal(Number(report.overdue_amount),5800 + accrued);
       const reportLedger = await reportsRepository.customerLedger(customer);
       assert.equal(Number(reportLedger.loans.find(r=>r.id===loan).due_till_today),6000 + accrued);
       await dashboardRepository.missedEmiSummary();
@@ -215,6 +253,11 @@ test('historical statement coverage, corrections and penalties', async () => {
       actual = (await loanRepository.collectionsFor(threshold)).find(r=>r.id===entry.id);
       assert.equal(actual.type,'advance','Amount edit must override stale Partial type');
       assert.equal(actual.agent_name,'Test Admin');
+      const advanceSummary = await loanRepository.findById(threshold);
+      assert.equal(Number(advanceSummary.expected_till_today),800);
+      assert.equal(Number(advanceSummary.received_till_today),1000);
+      assert.equal(Number(advanceSummary.due_till_today),-200,'Statement shortfall is Expected minus Paid');
+      assert.equal(Number(advanceSummary.advance_balance),200);
       await collectionService.update(entry.id,{amount:800},actor,'admin');
       actual = (await loanRepository.collectionsFor(threshold)).find(r=>r.id===entry.id);
       assert.equal(actual.type,'full');
@@ -222,7 +265,7 @@ test('historical statement coverage, corrections and penalties', async () => {
       const earlier = (await loanRepository.collectionsFor(threshold)).filter(r=>r.amount==='0.00').at(-1);
       await assert.rejects(collectionService.update(entry.id,{collectedDate:earlier.entry_date},actor,'admin'),/already has an entry/);
       await collectionService.remove(entry.id,actor,'admin');
-      assert.equal(await penaltyToday(),200);
+      assert.equal(await penaltyToday(),0);
       assert.equal(Number((await db.query("SELECT count(*) AS n FROM account_transactions WHERE reference_id=$1",[entry.id])).rows[0].n),0);
       const replacementEntry = await collectionService.record({...input,amount:1000},actor,'admin');
       assert.ok(replacementEntry.id);
@@ -273,9 +316,9 @@ test('historical statement coverage, corrections and penalties', async () => {
       const maturityCharges = async () => (await db.query(`SELECT penalty_date::text,amount FROM loan_daily_penalties
         WHERE loan_id=$1 ORDER BY penalty_date`,[maturedLoan])).rows;
       let dailyCharges = await maturityCharges();
-      assert.equal(dailyCharges.length,4,'Charges continue every day after the fourth installment');
+      assert.equal(dailyCharges.length,3,'Charges continue after maturity, but only for completed days');
       assert.ok(dailyCharges.every(r=>r.amount==='200.00'));
-      assert.equal(Number((await loanRepository.findById(maturedLoan)).expected_till_today),1600);
+      assert.equal(Number((await loanRepository.findById(maturedLoan)).expected_till_today),1400);
       assert.equal(Number((await db.query('SELECT sum(due_amount) AS n FROM emi_schedule WHERE loan_id=$1',[maturedLoan])).rows[0].n),800,'Contracted EMI debt never grows past maturity');
       const afterTermEntry = (await loanRepository.collectionsFor(maturedLoan)).find(r=>r.id===afterTermPayment);
       assert.equal(Number(afterTermEntry.expected_by_day),1200,'800 contract + 200 earlier penalty + 200 new penalty');
@@ -285,7 +328,7 @@ test('historical statement coverage, corrections and penalties', async () => {
       assert.equal((await maturityCharges()).length,1);
       assert.equal(Number((await loanRepository.findById(maturedLoan)).total_payable),1000);
       await collectionService.update(afterTermPayment,{amount:399.99},actor,'admin');
-      assert.equal((await maturityCharges()).length,4);
+      assert.equal((await maturityCharges()).length,3);
       await collectionService.update(afterTermPayment,{amount:300},actor,'admin');
       dailyCharges = await maturityCharges();
       await sweepMissedEmis();
@@ -302,7 +345,7 @@ test('historical statement coverage, corrections and penalties', async () => {
       assert.deepEqual(await maturityCharges(),dailyCharges,'Paid loans stop accruing');
       await collectionService.remove(payoff.id,actor,'admin');
       assert.equal((await loanRepository.findById(maturedLoan)).status,'active');
-      assert.equal((await maturityCharges()).length,4,'Deleting payoff restores combined arrears and daily penalty');
+      assert.equal((await maturityCharges()).length,3,'Deleting payoff restores arrears without charging the open day');
       const afterTermAuto = (await loanRepository.collectionsFor(maturedLoan)).find(r=>r.emi_id===null && r.amount==='0.00');
       assert.ok(afterTermAuto,'Post-maturity missed days have automatic entries without inventing an EMI');
       await collectionService.remove(afterTermAuto.id,actor,'admin');
@@ -315,7 +358,7 @@ test('historical statement coverage, corrections and penalties', async () => {
       await loanService.close(maturedLoan,{waiver:true,reason:'Test settlement'},actor);
       settled = await loanRepository.findById(maturedLoan);
       assert.equal(settled.status,'closed');
-      assert.equal(Number(settled.waiver_amount),1300);
+      assert.equal(Number(settled.waiver_amount),1100);
       const finalStatement = await loanRepository.collectionsFor(maturedLoan);
       dailyCharges = await maturityCharges();
       await sweepMissedEmis();
@@ -350,8 +393,8 @@ test('historical statement coverage, corrections and penalties', async () => {
       const loadTotals = (await db.query(`SELECT count(*)::int AS n,min(total_payable) AS minimum,max(total_payable) AS maximum
         FROM loans WHERE loan_number LIKE 'LOAD-%'`)).rows[0];
       assert.equal(loadTotals.n,100);
-      assert.equal(Number(loadTotals.minimum),59400); // 24,000 + 177 daily charges of 200
-      assert.equal(Number(loadTotals.maximum),59400);
+      assert.equal(Number(loadTotals.minimum),59200); // 24,000 + 176 completed-day charges of 200
+      assert.equal(Number(loadTotals.maximum),59200);
       assert.equal(Number((await db.query(`SELECT count(*) AS n FROM collections c JOIN loans l ON l.id=c.loan_id
         WHERE l.loan_number LIKE 'LOAD-%'`)).rows[0].n),17900);
       // A backdated full payoff removes unnecessary later system rows and

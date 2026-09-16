@@ -26,6 +26,7 @@ export function historyCtes(scoped: boolean, includeClosed = false): string {
     UNION ALL
     SELECT p.loan_id, p.penalty_date, 0::numeric, p.amount, p.amount
       FROM loan_daily_penalties p JOIN scope s ON s.id = p.loan_id
+     WHERE p.penalty_date < CURRENT_DATE
     UNION ALL
     SELECT s.id, d::date, 0::numeric, 0::numeric, 0::numeric
       FROM scope s CROSS JOIN LATERAL generate_series(s.loan_date, CURRENT_DATE, interval '1 day') d
@@ -123,8 +124,9 @@ export async function reconcileHistory(loanId: string | null, client: PoolClient
 }
 
 /** Reconstruct daily charges chronologically, never from stored penalty totals.
- * Each day checks scheduled dues + PRIOR penalties - dated receipts. Today's
- * charge is added only once, then participates in subsequent days' thresholds.
+ * Each completed day checks scheduled dues + PRIOR penalties - dated receipts.
+ * The open collection day is never charged. Closed-day charges are added once
+ * and participate in subsequent completed days' thresholds.
  * Full-term EMI debt is capped by the schedule; calendar days are not capped.
  */
 export async function reconcileHistoricalPenalties(loanId: string | null, client: PoolClient) {
@@ -156,21 +158,21 @@ export async function reconcileHistoricalPenalties(loanId: string | null, client
     walk AS (
       SELECT i.loan_id, i.day, i.n, charge.amount AS penalty, charge.amount AS accrued
         FROM inputs i CROSS JOIN LATERAL (
-          SELECT CASE WHEN i.day >= i.loan_date AND i.base_shortfall > i.allowance
+          SELECT CASE WHEN i.day >= i.loan_date AND i.day < CURRENT_DATE AND i.base_shortfall > i.allowance
                       THEN i.daily_charge ELSE 0::numeric END AS amount
         ) charge WHERE i.n = 1
       UNION ALL
       SELECT i.loan_id, i.day, i.n, charge.amount, w.accrued + charge.amount
         FROM walk w JOIN inputs i ON i.loan_id = w.loan_id AND i.n = w.n + 1
         CROSS JOIN LATERAL (
-          SELECT CASE WHEN i.day >= i.loan_date AND i.base_shortfall + w.accrued > i.allowance
+          SELECT CASE WHEN i.day >= i.loan_date AND i.day < CURRENT_DATE AND i.base_shortfall + w.accrued > i.allowance
                       THEN i.daily_charge ELSE 0::numeric END AS amount
         ) charge
     ),
     target AS MATERIALIZED (SELECT loan_id,day,penalty FROM walk),
-    old_totals AS MATERIALIZED (
-      SELECT s.id, COALESCE(sum(p.amount),0) AS amount FROM scope s
-        LEFT JOIN loan_daily_penalties p ON p.loan_id = s.id GROUP BY s.id
+    contracts AS MATERIALIZED (
+      SELECT e.loan_id, sum(e.due_amount) AS amount FROM emi_schedule e
+        JOIN scope s ON s.id = e.loan_id GROUP BY e.loan_id
     ),
     new_totals AS (SELECT loan_id,sum(penalty) AS amount FROM target GROUP BY loan_id),
     removed AS (
@@ -194,9 +196,10 @@ export async function reconcileHistoricalPenalties(loanId: string | null, client
          AND e.missed_penalty IS DISTINCT FROM COALESCE(t.penalty,0)
       RETURNING e.id
     ),
-    deltas AS (SELECT o.id,COALESCE(n.amount,0) - o.amount AS delta
-                 FROM old_totals o LEFT JOIN new_totals n ON n.loan_id = o.id)
-    UPDATE loans l SET total_payable = l.total_payable + d.delta
-      FROM deltas d WHERE l.id = d.id AND d.delta <> 0 RETURNING l.id`, loanId ? [loanId] : []);
+    totals AS (SELECT c.loan_id,c.amount + COALESCE(n.amount,0) AS payable
+                 FROM contracts c LEFT JOIN new_totals n ON n.loan_id = c.loan_id)
+    UPDATE loans l SET total_payable = t.payable
+      FROM totals t WHERE l.id = t.loan_id AND l.total_payable IS DISTINCT FROM t.payable
+    RETURNING l.id`, loanId ? [loanId] : []);
   return result.rowCount ?? 0;
 }

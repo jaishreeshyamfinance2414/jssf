@@ -10,13 +10,21 @@ For each business date:
   accrued BEFORE that date.
 - Received = collection amounts + separate penalty receipts effective on or
   before that date. Count every receipt once, including separate penalty money.
-- Shortfall = max(expected - received, 0).
+- Statement Shortfall Till Today = Expected Till Today - Paid. A negative
+  number denotes an advance; operational arrears remain clamped to zero.
 - Advance balance = max(received - expected, 0).
 - Penalty applies when opening expected minus received is strictly greater
   than three regular EMIs. Exactly three EMIs is allowed. Add at most one
   charge per calendar day at the configured percentage of principal.
-- Closing expected = opening expected + today's eligible charge. This is the
-  expected amount displayed in statements and used for historical labels.
+- Charges are finalized only for dates BEFORE the current business date.
+  The open day never receives a penalty, even when the threshold is exceeded.
+  The sweep removes premature open-day charges from older versions.
+- Expected Till Today = scheduled EMI dues through today + finalized penalties.
+  Today remains an EMI due day (the issue date is day one); only penalties wait
+  until day-end. Weekly/monthly schedules and the contract cap are preserved.
+- Total Payable = all contracted scheduled EMIs + finalized penalties. Sweeps
+  rebuild this absolute total, repairing a stale low/high stored value even
+  when no penalty amounts changed. Manually settled loans remain frozen.
 - Prior unpaid penalties DO participate in later days' threshold checks.
   Rebuild from receipts chronologically, not from stored penalty totals, so
   repeated sweeps cannot compound charges for the same day.

@@ -56,7 +56,8 @@ export const collectionRepository = {
       `SELECT co.*, l.loan_number, c.full_name AS customer_name, c.mobile AS customer_mobile,
               COALESCE(agent.full_name, creator.full_name, 'Automatic') AS agent_name,
               COALESCE((SELECT p.amount FROM loan_daily_penalties p
-                WHERE p.loan_id = co.loan_id AND p.penalty_date = co.collected_at::date),0) AS missed_penalty
+                WHERE p.loan_id = co.loan_id AND p.penalty_date = co.collected_at::date
+                  AND p.penalty_date < CURRENT_DATE),0) AS missed_penalty
          FROM collections co
          JOIN loans l ON l.id = co.loan_id
          JOIN customers c ON c.id = l.customer_id
@@ -75,7 +76,7 @@ export const collectionRepository = {
    */
   async sheet() {
     const { rows } = await query(
-      `SELECT l.id AS loan_id, l.loan_number, l.principal, l.total_payable, l.emi_amount,
+      `SELECT l.id AS loan_id, l.loan_number, l.principal, dues.total_payable, l.emi_amount,
               l.emi_frequency, l.loan_date::text AS start_date,
               c.full_name AS customer_name, c.mobile AS customer_mobile,
               c.work AS customer_work,
@@ -130,7 +131,7 @@ export const collectionRepository = {
     // for the collection desk table (missed count, due-till-today incl.
     // penalty, received, remaining, dates).
     const { rows } = await query(
-      `SELECT e.*, l.loan_number, l.principal, l.total_payable, l.loan_date::text AS start_date,
+      `SELECT e.*, l.loan_number, l.principal, dues.total_payable, l.loan_date::text AS start_date,
               LEAST(l.emi_amount,balance.shortfall)::text AS collection_due,
               c.full_name AS customer_name, c.mobile AS customer_mobile,
               coverage.missed_count, balance.shortfall::text AS due_till_today,
@@ -214,7 +215,7 @@ export const collectionRepository = {
                      AND f.due_date > CURRENT_DATE THEN 'advance'::emi_status
                 WHEN GREATEST(0, LEAST(f.due_amount, t.collected - f.prior_due)) >= f.due_amount
                      THEN 'paid'::emi_status
-                WHEN f.due_date < CURRENT_DATE OR f.missed_penalty > 0 THEN 'missed'::emi_status
+                WHEN f.due_date < CURRENT_DATE THEN 'missed'::emi_status
                 WHEN GREATEST(0, LEAST(f.due_amount, t.collected - f.prior_due)) > 0
                      THEN 'partial'::emi_status
                 ELSE 'pending'::emi_status
@@ -262,7 +263,7 @@ export const collectionRepository = {
                      AND f.due_date > CURRENT_DATE THEN 'advance'::emi_status
                 WHEN GREATEST(0, LEAST(f.due_amount, t.collected - f.prior_due)) >= f.due_amount
                      THEN 'paid'::emi_status
-                WHEN f.due_date < CURRENT_DATE OR f.missed_penalty > 0 THEN 'missed'::emi_status
+                WHEN f.due_date < CURRENT_DATE THEN 'missed'::emi_status
                 WHEN GREATEST(0, LEAST(f.due_amount, t.collected - f.prior_due)) > 0
                      THEN 'partial'::emi_status
                 ELSE 'pending'::emi_status
