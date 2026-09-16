@@ -34,7 +34,10 @@ interface Loan {
   waiver_amount: string;
 }
 interface LoanDetail {
-  loan: Loan & { total_payable: string; customer_mobile: string };
+  loan: Loan & {
+    received_till_today: string; expected_till_today: string; due_till_today: string;
+    advance_balance: string; business_date: string; total_penalty: string;
+  };
   schedule: Array<{
     id: string;
     installment_no: number;
@@ -52,6 +55,8 @@ interface LoanDetail {
     type: string;
     mode: string;
     collected_at: string;
+    entry_date: string;
+    timing: 'advance' | 'missed' | 'delayed' | 'on_time';
     agent_name: string | null;
     agent_ledger_id: string | null;
     note: string | null;
@@ -258,7 +263,7 @@ export default function LoansPage() {
       amount: String(Number(c.amount)),
       penalty: String(Number(c.penalty)),
       type: c.type,
-      collectedDate: new Date(c.collected_at).toISOString().slice(0, 10),
+      collectedDate: c.entry_date,
     });
   };
   const startEdit = (loan: Loan) => {
@@ -482,6 +487,9 @@ export default function LoansPage() {
                   <Metric label="Total Payable" value={money(summary.totalPayable)} />
                   <Metric label="Paid" value={money(summary.paid)} />
                   <Metric label="Remaining" value={money(summary.remaining)} />
+                  <Metric label="Expected Through Today" value={money(history.loan.expected_till_today)} />
+                  <Metric label="Shortfall Including Penalties" value={money(history.loan.due_till_today)} />
+                  <Metric label="Advance Balance" value={money(history.loan.advance_balance)} />
                   <Metric label="Penalty Added" value={money(summary.penalty)} />
                   <Metric label="Advance Payment" value={String(summary.advance)} />
                   <Metric label="On Time" value={String(summary.onTime)} />
@@ -562,7 +570,6 @@ export default function LoansPage() {
                 <DataTable
                   columns={['Collected On', 'EMI No', 'Due Date', 'Amount', 'Penalty', 'Type', 'Mode', 'Agent', 'Timing', 'Action']}
                   rows={history.collections.map((c) => {
-                    const delayed = c.due_date ? new Date(c.collected_at) > endOfDay(c.due_date) : false;
                     const isCoverageMarker = isAdvanceCoverageMarker(c);
                     const canModifyCoverageMarker = !isCoverageMarker || user?.role === 'admin';
                     return [
@@ -570,21 +577,14 @@ export default function LoansPage() {
                       c.installment_no ?? '-',
                       c.due_date ? date(c.due_date) : '-',
                       money(c.amount),
-                      // Missed day entries carry no money — show the penalty
-                      // accrued onto the EMI (already added to total payable).
-                      c.type === 'missed'
-                        ? <span key={`${c.id}-pen`} className="font-medium text-danger">+{money(c.missed_penalty ?? 0)}</span>
+                      // Arrears can incur a penalty even on a payment day.
+                      Number(c.missed_penalty) > 0
+                        ? <span key={`${c.id}-pen`}><span className="font-medium text-danger">+{money(c.missed_penalty ?? 0)} added</span>{Number(c.penalty) > 0 && <span className="block text-xs">{money(c.penalty)} collected</span>}</span>
                         : money(c.penalty),
                       <StatusPill key={`${c.id}-type`} value={TYPE_LABEL[c.type] ?? c.type} />,
-                      Number(c.amount) === 0 ? '-' : c.mode === 'cash' ? 'Cash' : 'UPI/Bank',
+                      Number(c.amount) + Number(c.penalty) === 0 ? '-' : c.mode === 'cash' ? 'Cash' : 'UPI/Bank',
                       isCoverageMarker ? 'Automatic' : c.agent_name ?? '-',
-                      c.type === 'advance'
-                        ? 'Advance'
-                        : isCoverageMarker
-                          ? 'On time'
-                          : c.due_date
-                            ? (delayed ? 'Delayed' : 'On time')
-                            : 'Manual',
+                      ({ advance: 'Advance', missed: 'Missed', delayed: 'Delayed', on_time: 'On time' })[c.timing],
                       <div key={c.id} className="flex flex-wrap gap-2">
                         {isCoverageMarker && user?.role !== 'admin' ? (
                           <span className="text-xs text-muted-foreground">System entry</span>
@@ -697,12 +697,6 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function endOfDay(value: string) {
-  const d = new Date(value);
-  d.setHours(23, 59, 59, 999);
-  return d;
-}
-
 function isAdvanceCoverageMarker(collection: { amount: string; type: string; note: string | null }): boolean {
   return Number(collection.amount) === 0 &&
     ['advance', 'full'].includes(collection.type) &&
@@ -713,29 +707,16 @@ function isAdvanceCoverageMarker(collection: { amount: string; type: string; not
 }
 
 function buildPaymentSummary(detail: LoanDetail) {
-  // Paid = sum of every collection actually recorded against this loan (matches
-  // the backend's remaining-balance enforcement in collection.service.ts), not
-  // a per-EMI sum — a per-EMI calculation zeroes out any installment paid
-  // extra instead of applying that surplus toward the loan's overall balance.
+  // Monetary balances and historical timing come from the shared backend rule.
+  // The browser timezone and old EMI anchors cannot change classifications.
   const totalPayable = Number(detail.loan.total_payable);
-  const paid = detail.collections.reduce((sum, c) => sum + Number(c.amount), 0);
-  const remaining = Math.max(0, Number((totalPayable - paid).toFixed(2)));
-  const today = endOfDay(new Date().toISOString());
-  const missed = detail.schedule.filter((e) => Number(e.paid_amount) < Number(e.due_amount) && endOfDay(e.due_date) < today).length;
-  // Total penalty accrued from missed days (already included in total_payable).
-  const penalty = detail.schedule.reduce((sum, e) => sum + Number(e.missed_penalty || 0), 0);
-  // Zero-amount 'missed' day entries are not payments — keep them out of the timing stats.
-  const payments = detail.collections.filter((c) => c.type !== 'missed');
-  // Advance entries are their own statement category. This includes the real
-  // lump-sum collection and each zero-value day it covers before the final
-  // covered installment, which is counted as on time.
-  const advance = payments.filter((c) => c.type === 'advance').length;
-  const regularPayments = payments.filter((c) => c.type !== 'advance');
-  const onTime = regularPayments.filter((c) =>
-    isAdvanceCoverageMarker(c) || (c.due_date && new Date(c.collected_at) <= endOfDay(c.due_date)),
-  ).length;
-  const delayed = regularPayments.filter((c) =>
-    !isAdvanceCoverageMarker(c) && c.due_date && new Date(c.collected_at) > endOfDay(c.due_date),
-  ).length;
+  const paid = Number(detail.loan.received_till_today);
+  const remaining = Number(detail.loan.remaining);
+  const penalty = Number(detail.loan.total_penalty);
+  const entries = detail.collections.filter(c => c.entry_date <= detail.loan.business_date);
+  const missed = entries.filter(c => c.timing === 'missed').length;
+  const advance = entries.filter(c => c.timing === 'advance').length;
+  const onTime = entries.filter(c => c.timing === 'on_time').length;
+  const delayed = entries.filter(c => c.timing === 'delayed').length;
   return { totalPayable, paid, remaining, penalty, missed, advance, onTime, delayed };
 }

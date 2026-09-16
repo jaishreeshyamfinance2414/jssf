@@ -1,7 +1,7 @@
 import { logger } from '../../config/logger';
 import { withTransaction } from '../../db/pool';
 import { collectionRepository } from './collection.repository';
-import { reconcileHistory, reconcileHistoricalPenalties } from './statement-history';
+import { reconcileHistory } from './statement-history';
 
 /**
  * Daily-entry guarantee: every active loan must have an entry for every EMI
@@ -48,6 +48,10 @@ export async function sweepMissedEmis(): Promise<{
         return { missedMarked: 0, penalized: 0, advancesMatured: 0, advanceEntries: 0, onTimeEntries: 0 };
       }
 
+      // Same lock order as payment mutations prevents a sweep from using a
+      // half-corrected receipt history or deadlocking on collection/loan rows.
+      await client.query(`SELECT id FROM loans WHERE status = 'active' ORDER BY id FOR UPDATE`);
+
       // Rebuild current financial allocation separately from dated statement
       // history. Settlement of arrears must not rewrite earlier missed days.
       await collectionRepository.rebuildAllActiveEmiStates(client);
@@ -81,9 +85,15 @@ export async function sweepMissedEmis(): Promise<{
       );
       logger.debug({ rows: duplicateAutomaticEntries.rowCount }, 'Sweep: duplicate automatic entries removed');
 
-      const { advanceEntries, onTimeEntries, missedEntries } =
+      const { advanceEntries, onTimeEntries, missedEntries, penalized } =
         await reconcileHistory(null, client);
-      const penalized = await reconcileHistoricalPenalties(null, client);
+
+      // Stop all future daily accrual/entries once the combined liability is paid.
+      await client.query(`UPDATE loans l SET status = 'closed', closed_at = now()
+        WHERE l.status = 'active' AND l.closed_by IS NULL
+          AND EXISTS (SELECT 1 FROM emi_schedule e WHERE e.loan_id = l.id)
+          AND l.total_payable <= COALESCE((SELECT sum(c.amount + c.penalty) FROM collections c
+            WHERE c.loan_id = l.id AND c.collected_at < CURRENT_DATE::timestamp + interval '1 day'),0)`);
 
       const matured = await client.query(
         `UPDATE emi_schedule SET status = 'paid'

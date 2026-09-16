@@ -1,4 +1,5 @@
 import { query } from '../../db/pool';
+import { loanBalanceJoin } from '../loans/loan-balance';
 
 /**
  * Read-only reporting queries. Every report takes a from/to date range
@@ -69,20 +70,18 @@ export const reportsRepository = {
     const { rows } = await query(
       `SELECT l.loan_number, cu.full_name AS customer_name, cu.mobile,
               COALESCE(a.name, 'Unassigned') AS area,
-              count(*) AS missed_count,
-              min(e.due_date)::text AS oldest_due,
-              COALESCE(sum(e.due_amount - e.paid_amount), 0)::text AS overdue_amount,
-              COALESCE(sum(e.missed_penalty), 0)::text AS penalty,
-              GREATEST(0, l.total_payable - COALESCE((SELECT sum(amount) FROM collections WHERE loan_id = l.id), 0))::text AS loan_remaining
-         FROM emi_schedule e
-         JOIN loans l ON l.id = e.loan_id
+              coverage.missed_count,
+              coverage.next_due_date::text AS oldest_due,
+              balance.overdue::text AS overdue_amount,
+              dues.penalty::text AS penalty,
+              balance.remaining::text AS loan_remaining
+         FROM loans l
          JOIN customers cu ON cu.id = l.customer_id
          LEFT JOIN areas a ON a.id = cu.area_id
+         ${loanBalanceJoin}
         WHERE l.status = 'active'
-          AND e.due_date < CURRENT_DATE
-          AND e.status IN ('pending','partial','missed')
-        GROUP BY l.id, l.loan_number, cu.full_name, cu.mobile, a.name
-        ORDER BY count(*) DESC, sum(e.due_amount - e.paid_amount) DESC`,
+          AND balance.overdue > 0
+        ORDER BY coverage.missed_count DESC, balance.overdue DESC`,
     );
     return rows;
   },
@@ -98,9 +97,10 @@ export const reportsRepository = {
     const { rows: loans } = await query(
       `SELECT l.id, l.loan_number, l.principal::text, l.total_payable::text, l.status,
               l.loan_date::text, l.emi_amount::text, l.emi_frequency, l.tenure_count,
-              COALESCE((SELECT sum(amount) FROM collections WHERE loan_id = l.id), 0)::text AS paid,
-              GREATEST(0, l.total_payable - COALESCE((SELECT sum(amount) FROM collections WHERE loan_id = l.id), 0))::text AS remaining
+              receipts.received::text AS paid, balance.remaining::text,
+              dues.expected::text AS expected_till_today, balance.shortfall::text AS due_till_today
          FROM loans l
+         ${loanBalanceJoin}
         WHERE l.customer_id = $1
         ORDER BY l.created_at DESC`,
       [customerId],

@@ -8,6 +8,7 @@ import { audit } from '../audit/audit.service';
 import { loanRepository } from '../loans/loan.repository';
 import { CreateCollectionBody, UpdateCollectionBody } from './collection.schema';
 import { collectionRepository } from './collection.repository';
+import { reconcileHistoricalPenalties } from './statement-history';
 
 export const collectionService = {
   async record(input: CreateCollectionBody, actorId: string, actorRole: string, ip?: string | null) {
@@ -112,10 +113,12 @@ export const collectionService = {
       // = principal + interest, e.g. ₹10,000 over 120 days @ ₹100/day = ₹12,000
       // payable). Locking the loan row above serializes concurrent collection
       // attempts for the same loan, so this check can't be raced.
-      const totalPayable = Number(loan.total_payable);
+      await reconcileHistoricalPenalties(input.loanId, client);
+      const currentLoan = await loanRepository.lockForUpdate(input.loanId, client);
+      const totalPayable = Number(currentLoan.total_payable);
       const alreadyCollected = await collectionRepository.totalCollectedForLoan(input.loanId, client);
       const remaining = Number((totalPayable - alreadyCollected).toFixed(2));
-      if (input.amount > remaining + 0.01) {
+      if (input.amount + input.penalty > remaining + 0.01) {
         throw BadRequest(
           remaining <= 0
             ? 'This loan is already fully paid. No further collection can be recorded.'
@@ -126,7 +129,8 @@ export const collectionService = {
       // Classify the entry from what's actually due today: paying more than
       // the anchor EMI's remaining due is an advance (the surplus fills the
       // following EMIs), exactly the due is full, less is partial.
-      const type = await classifyPayment(input, client);
+      // The shared chronological calculation assigns the final type below.
+      let type = 'full';
 
       // Admin collects directly (e.g. at the office/counter) — that cash is
       // already in hand, so it needs no agent handover/confirmation step.
@@ -135,7 +139,7 @@ export const collectionService = {
       const isDirectAdminCash = input.mode === 'cash' && actorRole === 'admin';
 
       const collection = await collectionRepository.create(
-        { ...input, type, agentId: actorId, createdBy: actorId, reconciledImmediately: isDirectAdminCash },
+        { ...input, type: 'full', agentId: actorId, createdBy: actorId, reconciledImmediately: isDirectAdminCash },
         client,
       );
 
@@ -143,6 +147,7 @@ export const collectionService = {
       // overpayment marks today paid and upcoming EMIs 'advance'.
       await collectionRepository.rebuildEmiState(input.loanId, client);
       await collectionRepository.reconcileStatementCoverage(input.loanId, client);
+      type = (await client.query('SELECT type FROM collections WHERE id = $1', [collection.id])).rows[0].type;
       await loanRepository.markClosedIfFullyPaid(input.loanId, client);
 
       if (input.mode !== 'cash' || isDirectAdminCash) {
@@ -201,11 +206,11 @@ export const collectionService = {
         throw BadRequest('This loan was manually closed/settled. Its collection entries cannot be edited.');
       }
 
-      const isConvertingToMissed = collection.type !== 'missed' && input.type === 'missed';
+      const isConvertingToMissed = input.type === 'missed';
       const isConvertingToPaid = collection.type === 'missed' && input.type !== undefined && input.type !== 'missed';
 
       // Block amount changes on missed entries unless changing type away from missed
-      if (collection.type === 'missed' && !isConvertingToPaid && input.amount !== undefined && input.amount > 0) {
+      if (collection.type === 'missed' && !isConvertingToPaid && (Number(input.amount ?? 0) + Number(input.penalty ?? 0)) > 0) {
         throw BadRequest('A missed entry cannot have an amount. Change the type to record a payment.');
       }
 
@@ -220,21 +225,23 @@ export const collectionService = {
         newAmount = 0;
         newPenalty = 0;
       } else if (isConvertingToPaid) {
-        if (!input.amount || input.amount <= 0) {
+        if ((input.amount ?? 0) + (input.penalty ?? 0) <= 0) {
           throw BadRequest('Amount must be greater than 0 when converting a missed entry to a payment.');
         }
-        newAmount = input.amount;
+        newAmount = input.amount ?? 0;
         newPenalty = input.penalty ?? 0;
       }
-      if (!wasAutomaticCoverageMarker && oldAmount > 0 && newType !== 'missed' && newAmount <= 0) {
+      if (!wasAutomaticCoverageMarker && oldAmount + oldPenalty > 0 && newType !== 'missed' && newAmount + newPenalty <= 0) {
         throw BadRequest('Payment amount must be greater than 0.');
       }
 
       // The edited amount must still fit in the loan's total payable.
-      const totalPayable = Number(loan.total_payable);
+      await reconcileHistoricalPenalties(collection.loan_id, client);
+      const currentLoan = await loanRepository.lockForUpdate(collection.loan_id, client);
+      const totalPayable = Number(currentLoan.total_payable);
       const collected = await collectionRepository.totalCollectedForLoan(collection.loan_id, client);
-      if (collected - oldAmount + newAmount > totalPayable + 0.01) {
-        const room = Number((totalPayable - (collected - oldAmount)).toFixed(2));
+      if (collected - oldAmount - oldPenalty + newAmount + newPenalty > totalPayable + 0.01) {
+        const room = Number((totalPayable - (collected - oldAmount - oldPenalty)).toFixed(2));
         throw BadRequest(`Amount exceeds the loan's total payable. Maximum for this entry: ₹${room.toFixed(2)}.`);
       }
 
@@ -242,8 +249,12 @@ export const collectionService = {
       // survives the move.
       let collectedAt: string | null = null;
       if (input.collectedDate) {
-        const time = new Date(collection.collected_at).toISOString().slice(11);
-        collectedAt = `${input.collectedDate}T${time}`;
+        collectedAt = input.collectedDate;
+        const { rows: duplicate } = await client.query(`SELECT 1 FROM collections
+          WHERE loan_id = $1 AND id <> $2 AND collected_at >= $3::date
+            AND collected_at < $3::date + interval '1 day' LIMIT 1`,
+          [collection.loan_id, id, collectedAt]);
+        if (duplicate.length) throw BadRequest('This loan already has an entry available on the selected date.');
       }
 
       await collectionRepository.updateEntry(
@@ -277,8 +288,9 @@ export const collectionService = {
           referenceId: id,
           description: `Collection (type correction) for ${loan.loan_number}`,
           createdBy: actorId,
+          txnDate: input.collectedDate ?? collection.entry_date,
         });
-      } else if (wasAutomaticCoverageMarker && newAmount > 0) {
+      } else if (oldAmount + oldPenalty === 0 && newAmount + newPenalty > 0) {
         // Editing a generated zero-value row into a real payment makes the
         // admin its owner and creates the financial posting that did not exist
         // for the derived entry.
@@ -291,7 +303,7 @@ export const collectionService = {
           referenceId: id,
           description: `Collection (automatic entry correction) for ${loan.loan_number}`,
           createdBy: actorId,
-          txnDate: input.collectedDate ?? null,
+          txnDate: input.collectedDate ?? collection.entry_date,
         });
       } else if (collection.type !== 'missed') {
         // Regular amount/penalty/date edit on a payment entry
@@ -379,30 +391,20 @@ export const collectionService = {
       // remove it. Safe no-op for unreconciled agent cash (never hit the ledger).
       await accountsRepository.deleteBySourceRef('collection', id, client);
 
-      if (wasAutomaticCoverageMarker && collection.emi_id) {
-        await collectionRepository.suppressAutomaticStatementEntry(
-          collection.emi_id,
-          collection.loan_id,
-          actorId,
-          client,
-        );
-      }
       await collectionRepository.deleteById(id, client);
 
-      // Deleting a 'missed' day entry also takes back the penalty it accrued
-      // onto the EMI due and the loan total (unless another missed entry for
-      // the same EMI remains).
-      if (collection.type === 'missed' && collection.emi_id) {
-        await collectionRepository.reverseMissedPenalty(collection.emi_id, id, client);
-      }
+      // Removing a zero-value marker does not reduce arrears. Recalculate
+      // penalties from dated receipts below instead of waiving them here.
 
       await collectionRepository.rebuildEmiState(collection.loan_id, client);
-      // Keep the deleted date available for an admin's replacement entry.
+      // Keep the date available for a replacement now; the next sweep restores
+      // its automatic entry from dated receipts if no replacement is recorded.
       await collectionRepository.reconcileStatementCoverage(collection.loan_id, client, collection.collected_at);
 
       // If this collection had auto-closed the loan (closed_by stays NULL for
       // markClosedIfFullyPaid closures), reopen it.
-      if (loan.status === 'closed' && !loan.closed_by) {
+      const stillPaid = await loanRepository.markClosedIfFullyPaid(collection.loan_id, client);
+      if (!stillPaid && loan.status === 'closed' && !loan.closed_by) {
         await loanRepository.reopen(collection.loan_id, client);
       }
 
@@ -437,23 +439,4 @@ function isAutomaticCoverageMarker(collection: { amount: string | number; type: 
       'Auto-marked: installment covered by advance payment',
       'Auto-marked: advance coverage completed on time',
     ].includes(collection.note ?? '');
-}
-
-/** Advance means ahead of the cumulative schedule on the effective payment date. */
-async function classifyPayment(
-  input: CreateCollectionBody,
-  client: import('pg').PoolClient,
-): Promise<'full' | 'partial' | 'advance'> {
-  const { rows } = await client.query<{ expected: string; received: string; installment: string }>(
-    `SELECT COALESCE((SELECT sum(due_amount) FROM emi_schedule
-                       WHERE loan_id = $1 AND due_date <= COALESCE($2::date, CURRENT_DATE)),0)::text AS expected,
-            COALESCE((SELECT sum(amount) FROM collections WHERE loan_id = $1
-                       AND collected_at < COALESCE($2::date, CURRENT_DATE)::timestamp + interval '1 day'),0)::text AS received,
-            emi_amount::text AS installment FROM loans WHERE id = $1`,
-    [input.loanId, input.collectedDate ?? null],
-  );
-  if (!rows[0]) return 'advance';
-  if (Number(rows[0].received) + input.amount > Number(rows[0].expected) + 0.01) return 'advance';
-  if (input.amount >= Number(rows[0].installment) - 0.01) return 'full';
-  return 'partial';
 }

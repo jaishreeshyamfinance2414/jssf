@@ -1,7 +1,8 @@
 import { PoolClient } from 'pg';
 import { query } from '../../db/pool';
 import { CreateCollectionBody } from './collection.schema';
-import { reconcileHistory, reconcileHistoricalPenalties } from './statement-history';
+import { reconcileHistory } from './statement-history';
+import { loanBalanceJoin } from '../loans/loan-balance';
 
 export const collectionRepository = {
   /**
@@ -10,6 +11,14 @@ export const collectionRepository = {
    * statement/penalty sweep from failing before it reaches penalty handling.
    */
   async ensureStatementInfrastructure() {
+    await query(`CREATE TABLE IF NOT EXISTS loan_daily_penalties (
+      loan_id uuid NOT NULL REFERENCES loans(id) ON DELETE CASCADE,
+      penalty_date date NOT NULL, amount numeric(14,2) NOT NULL CHECK (amount >= 0),
+      PRIMARY KEY (loan_id, penalty_date))`);
+    await query(`INSERT INTO loan_daily_penalties(loan_id,penalty_date,amount)
+      SELECT loan_id,due_date,sum(missed_penalty) FROM emi_schedule
+      GROUP BY loan_id,due_date HAVING sum(missed_penalty) > 0
+      ON CONFLICT (loan_id,penalty_date) DO NOTHING`);
     await query(
       `CREATE TABLE IF NOT EXISTS statement_entry_suppressions (
          emi_id uuid PRIMARY KEY REFERENCES emi_schedule(id) ON DELETE CASCADE,
@@ -32,10 +41,11 @@ export const collectionRepository = {
     );
   },
 
-  /** Sum of all amounts (excluding penalty) already collected toward a loan's total payable. */
+  /** Both EMI and separate penalty receipts settle the combined payable. */
   async totalCollectedForLoan(loanId: string, client: PoolClient): Promise<number> {
     const { rows } = await client.query<{ s: string }>(
-      `SELECT COALESCE(sum(amount), 0)::text AS s FROM collections WHERE loan_id = $1`,
+      `SELECT COALESCE(sum(amount + penalty), 0)::text AS s FROM collections WHERE loan_id = $1
+        AND collected_at < CURRENT_DATE::timestamp + interval '1 day'`,
       [loanId],
     );
     return Number(rows[0].s);
@@ -45,13 +55,13 @@ export const collectionRepository = {
     const { rows } = await query(
       `SELECT co.*, l.loan_number, c.full_name AS customer_name, c.mobile AS customer_mobile,
               COALESCE(agent.full_name, creator.full_name, 'Automatic') AS agent_name,
-              e.missed_penalty
+              COALESCE((SELECT p.amount FROM loan_daily_penalties p
+                WHERE p.loan_id = co.loan_id AND p.penalty_date = co.collected_at::date),0) AS missed_penalty
          FROM collections co
          JOIN loans l ON l.id = co.loan_id
          JOIN customers c ON c.id = l.customer_id
          LEFT JOIN users agent ON agent.id = co.agent_id
          LEFT JOIN users creator ON creator.id = co.created_by
-         LEFT JOIN emi_schedule e ON e.id = co.emi_id
         ORDER BY co.collected_at DESC
         LIMIT 300`,
     );
@@ -70,30 +80,17 @@ export const collectionRepository = {
               c.full_name AS customer_name, c.mobile AS customer_mobile,
               c.work AS customer_work,
               a.name AS area_name,
-              (SELECT count(*) FROM emi_schedule m
-                WHERE m.loan_id = l.id AND m.due_date <= CURRENT_DATE
-                  AND m.paid_amount < m.due_amount AND m.status = 'missed')::int AS missed_count,
-              (SELECT COALESCE(sum(m.due_amount - m.paid_amount), 0) FROM emi_schedule m
-                WHERE m.loan_id = l.id AND m.due_date <= CURRENT_DATE
-                  AND m.paid_amount < m.due_amount)::text AS due_till_today,
-              (SELECT count(*) FROM emi_schedule m
-                WHERE m.loan_id = l.id AND m.due_date >= CURRENT_DATE
-                  AND m.paid_amount >= m.due_amount)::int AS advance_count,
-              (SELECT COALESCE(sum(m.paid_amount), 0) FROM emi_schedule m
-                WHERE m.loan_id = l.id AND m.due_date > CURRENT_DATE)::text AS advance_amount,
-              COALESCE((SELECT sum(co.amount) FROM collections co WHERE co.loan_id = l.id), 0)::text AS received,
-              GREATEST(0, l.total_payable - COALESCE((
-                SELECT sum(co.amount) FROM collections co WHERE co.loan_id = l.id
-              ), 0))::text AS remaining,
-              (SELECT max(m.due_date) FROM emi_schedule m WHERE m.loan_id = l.id)::text AS closing_date,
-              (SELECT min(m.due_date) FROM emi_schedule m
-                WHERE m.loan_id = l.id AND m.paid_amount < m.due_amount)::text AS next_due_date,
-              (SELECT COALESCE(sum(m.missed_penalty), 0) FROM emi_schedule m
-                WHERE m.loan_id = l.id)::text AS total_penalty,
+              coverage.missed_count, balance.shortfall::text AS due_till_today,
+              dues.expected::text AS expected_till_today,
+              coverage.advance_count, balance.advance::text AS advance_amount,
+              receipts.received::text, balance.remaining::text,
+              dues.closing_date::text, coverage.next_due_date::text,
+              dues.penalty::text AS total_penalty,
               t.today_type, t.today_mode, t.today_amount, t.today_at
          FROM loans l
          JOIN customers c ON c.id = l.customer_id
          LEFT JOIN areas a ON a.id = c.area_id
+         ${loanBalanceJoin}
          LEFT JOIN LATERAL (
            SELECT co.type AS today_type, co.mode AS today_mode,
                   co.amount::text AS today_amount, co.collected_at AS today_at
@@ -134,22 +131,21 @@ export const collectionRepository = {
     // penalty, received, remaining, dates).
     const { rows } = await query(
       `SELECT e.*, l.loan_number, l.principal, l.total_payable, l.loan_date::text AS start_date,
+              LEAST(l.emi_amount,balance.shortfall)::text AS collection_due,
               c.full_name AS customer_name, c.mobile AS customer_mobile,
-              (SELECT count(*) FROM emi_schedule m
-                WHERE m.loan_id = l.id AND m.due_date <= CURRENT_DATE
-                  AND m.paid_amount < m.due_amount AND m.status = 'missed')::int AS missed_count,
-              (SELECT COALESCE(sum(m.due_amount - m.paid_amount), 0) FROM emi_schedule m
-                WHERE m.loan_id = l.id AND m.due_date <= CURRENT_DATE
-                  AND m.paid_amount < m.due_amount)::text AS due_till_today,
-              COALESCE((SELECT sum(co.amount) FROM collections co WHERE co.loan_id = l.id), 0)::text AS received,
-              GREATEST(0, l.total_payable - COALESCE((
-                SELECT sum(co.amount) FROM collections co WHERE co.loan_id = l.id
-              ), 0))::text AS remaining,
-              (SELECT max(m.due_date) FROM emi_schedule m WHERE m.loan_id = l.id)::text AS closing_date
+              coverage.missed_count, balance.shortfall::text AS due_till_today,
+              dues.expected::text AS expected_till_today,
+              receipts.received::text, balance.remaining::text,
+              dues.closing_date::text
          FROM emi_schedule e
          JOIN loans l ON l.id = e.loan_id
          JOIN customers c ON c.id = l.customer_id
-        WHERE e.due_date <= CURRENT_DATE AND e.status IN ('pending','partial')
+         ${loanBalanceJoin}
+        WHERE l.status = 'active'
+          AND e.due_date = COALESCE(coverage.next_due_date,dues.closing_date)
+          AND e.due_date <= CURRENT_DATE AND balance.shortfall > 0
+          AND NOT EXISTS (SELECT 1 FROM collections today WHERE today.loan_id = l.id
+            AND today.collected_at >= CURRENT_DATE AND today.collected_at < CURRENT_DATE + interval '1 day')
         ORDER BY e.due_date ASC
         LIMIT 300`,
     );
@@ -198,6 +194,7 @@ export const collectionRepository = {
       `WITH totals AS (
          SELECT COALESCE(sum(amount), 0) AS collected
            FROM collections WHERE loan_id = $1
+             AND collected_at < CURRENT_DATE::timestamp + interval '1 day'
        ),
        fill AS (
          SELECT id, due_amount, due_date, missed_penalty,
@@ -235,6 +232,7 @@ export const collectionRepository = {
          SELECT l.id AS loan_id, COALESCE(sum(c.amount), 0) AS collected
            FROM loans l
            LEFT JOIN collections c ON c.loan_id = l.id
+             AND c.collected_at < CURRENT_DATE::timestamp + interval '1 day'
           WHERE l.status = 'active'
           GROUP BY l.id
        ),
@@ -282,86 +280,24 @@ export const collectionRepository = {
    * longer covered become Missed; missing elapsed dates are materialized.
    */
   async reconcileStatementCoverage(loanId: string | null, client: PoolClient, deletedAt?: Date | string) {
-    const result = await reconcileHistory(loanId, client, deletedAt);
-    await reconcileHistoricalPenalties(loanId, client);
-    return result;
+    return reconcileHistory(loanId, client, deletedAt);
   },
 
-  /**
-   * Agent explicitly marked the day missed — flip the EMI unless money already
-   * covers it, and accrue the missed-day penalty (settings.penalty.per_day_pct
-   * % of the loan principal) onto the EMI's missed_penalty and the loan's
-   * total payable. The EMI's due_amount is NOT touched — payments always fill
-   * base EMI days, and the penalty is recovered via the loan total instead.
-   *
-   * Grace rule: the first THREE misses of a streak are free — penalty applies
-   * from the 4th consecutive missed installment. Paying an installment resets
-   * the streak. missed_penalty=0 keeps the accrual once-only per EMI.
-   */
+  /** Explicit missed marker; the shared history calculation handles penalties. */
   async markEmiMissed(emiId: string, client: PoolClient) {
     await client.query(
       `UPDATE emi_schedule SET status = 'missed' WHERE id = $1 AND paid_amount < due_amount`,
       [emiId],
     );
-    await client.query(
-      `WITH pen AS (
-         SELECT COALESCE((value->>'per_day_pct')::numeric, 0) AS pct FROM settings WHERE key = 'penalty'
-       ),
-       upd AS (
-         UPDATE emi_schedule e
-            SET missed_penalty = round(l.principal * pen.pct / 100, 2)
-           FROM pen, loans l
-          WHERE e.id = $1 AND l.id = e.loan_id
-            AND e.status = 'missed' AND e.missed_penalty = 0 AND pen.pct > 0
-            AND (
-              SELECT count(*) FROM emi_schedule prev
-               WHERE prev.loan_id = e.loan_id
-                 AND prev.installment_no BETWEEN e.installment_no - 3 AND e.installment_no - 1
-                 AND prev.status = 'missed'
-            ) = 3
-          RETURNING e.loan_id, e.missed_penalty
-       )
-       UPDATE loans l
-          SET total_payable = l.total_payable + u.missed_penalty
-         FROM upd u
-        WHERE l.id = u.loan_id`,
-      [emiId],
-    );
-  },
-
-  /**
-   * Undo a missed-day penalty when the entry that caused it is deleted —
-   * unless another 'missed' entry still anchors to the same EMI. Only the
-   * loan's total_payable and the EMI's missed_penalty are reversed;
-   * due_amount was never inflated by the penalty.
-   */
-  async reverseMissedPenalty(emiId: string, excludeCollectionId: string, client: PoolClient) {
-    await client.query(
-      `WITH old AS (
-         SELECT id, loan_id, missed_penalty FROM emi_schedule
-          WHERE id = $1 AND missed_penalty > 0
-            AND NOT EXISTS (
-              SELECT 1 FROM collections c
-               WHERE c.emi_id = $1 AND c.type = 'missed' AND c.id <> $2
-            )
-          FOR UPDATE
-       ),
-       upd AS (
-         UPDATE emi_schedule e
-            SET missed_penalty = 0
-           FROM old o WHERE e.id = o.id
-       )
-       UPDATE loans l
-          SET total_payable = l.total_payable - o.missed_penalty
-         FROM old o
-        WHERE l.id = o.loan_id`,
-      [emiId, excludeCollectionId],
-    );
   },
 
   /** Lock a collection row for the duration of a delete transaction. */
   async findByIdForUpdate(id: string, client: PoolClient) {
-    const { rows } = await client.query(`SELECT * FROM collections WHERE id = $1 FOR UPDATE`, [id]);
+    // Always lock loan before collection, matching record() and the sweep.
+    await client.query(`SELECT l.id FROM loans l JOIN collections c ON c.loan_id = l.id
+                         WHERE c.id = $1 FOR UPDATE OF l`, [id]);
+    const { rows } = await client.query(`SELECT *, collected_at::date::text AS entry_date
+      FROM collections WHERE id = $1 FOR UPDATE`, [id]);
     return rows[0] ?? null;
   },
 
@@ -381,7 +317,8 @@ export const collectionRepository = {
       `UPDATE collections
           SET amount = $2, penalty = $3,
               type = COALESCE($4::payment_type, type),
-              collected_at = COALESCE($5::timestamptz, collected_at),
+              collected_at = CASE WHEN $5::date IS NULL THEN collected_at
+                                  ELSE ($5::date + collected_at::time)::timestamptz END,
               agent_id = CASE WHEN $6::uuid IS NULL THEN agent_id ELSE $6::uuid END,
               created_by = CASE WHEN $6::uuid IS NULL THEN created_by ELSE $6::uuid END,
               note = CASE WHEN $6::uuid IS NULL THEN note ELSE NULL END
@@ -394,14 +331,4 @@ export const collectionRepository = {
     await client.query(`DELETE FROM collections WHERE id = $1`, [id]);
   },
 
-  /** Prevent the hourly sweep from recreating an automatic statement row deleted by an admin. */
-  async suppressAutomaticStatementEntry(emiId: string, loanId: string, actorId: string, client: PoolClient) {
-    await client.query(
-      `INSERT INTO statement_entry_suppressions(emi_id, loan_id, suppressed_by)
-       VALUES ($1,$2,$3)
-       ON CONFLICT (emi_id) DO UPDATE
-         SET suppressed_by = EXCLUDED.suppressed_by, created_at = now()`,
-      [emiId, loanId, actorId],
-    );
-  },
 };

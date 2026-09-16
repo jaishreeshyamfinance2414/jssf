@@ -1,4 +1,5 @@
 import { query } from '../../db/pool';
+import { loanBalanceJoin } from '../loans/loan-balance';
 
 /**
  * Read-only aggregation queries powering the dashboard KPIs and breakdowns.
@@ -50,12 +51,12 @@ export const dashboardRepository = {
   /** Overdue installments: total unpaid amount + how many distinct areas they span. */
   async missedEmiSummary(): Promise<{ amount: number; areas: number }> {
     const { rows } = await query<{ amount: string; areas: string }>(
-      `SELECT COALESCE(sum(e.due_amount - e.paid_amount), 0)::text AS amount,
+      `SELECT COALESCE(sum(balance.overdue), 0)::text AS amount,
               count(DISTINCT c.area_id)::text AS areas
-         FROM emi_schedule e
-         JOIN loans l ON l.id = e.loan_id
+         FROM loans l
          JOIN customers c ON c.id = l.customer_id
-        WHERE e.due_date < CURRENT_DATE AND e.status IN ('pending','partial','missed')`,
+         ${loanBalanceJoin}
+        WHERE l.status = 'active' AND balance.overdue > 0`,
     );
     return { amount: Number(rows[0].amount), areas: Number(rows[0].areas) };
   },
@@ -63,10 +64,9 @@ export const dashboardRepository = {
   /** Remaining principal-plus-interest across all active loans. */
   async outstandingPrincipal(): Promise<number> {
     const { rows } = await query<{ s: string }>(
-      `SELECT COALESCE(sum(GREATEST(l.total_payable - COALESCE(paid.amt, 0), 0)), 0)::text AS s
+      `SELECT COALESCE(sum(balance.remaining), 0)::text AS s
          FROM loans l
-         LEFT JOIN (SELECT loan_id, sum(amount) AS amt FROM collections GROUP BY loan_id) paid
-                ON paid.loan_id = l.id
+         ${loanBalanceJoin}
         WHERE l.status = 'active'`,
     );
     return Number(rows[0].s);
@@ -91,10 +91,9 @@ export const dashboardRepository = {
   /** Distinct loans carrying an overdue EMI, and the penalty accrued on them. */
   async overdueLoans(): Promise<{ count: number; penalty: number }> {
     const { rows } = await query<{ c: string; penalty: string }>(
-      `SELECT count(DISTINCT loan_id)::text AS c,
-              COALESCE(sum(penalty_amount), 0)::text AS penalty
-         FROM emi_schedule
-        WHERE due_date < CURRENT_DATE AND status IN ('pending','partial','missed')`,
+      `SELECT count(*)::text AS c, COALESCE(sum(dues.penalty),0)::text AS penalty
+         FROM loans l ${loanBalanceJoin}
+        WHERE l.status = 'active' AND balance.overdue > 0`,
     );
     return { count: Number(rows[0].c), penalty: Number(rows[0].penalty) };
   },
@@ -182,18 +181,16 @@ export const dashboardRepository = {
 
   async todaysDue(): Promise<number> {
     const { rows } = await query<{ s: string }>(
-      `SELECT COALESCE(sum(due_amount - paid_amount),0)::text AS s
-         FROM emi_schedule
-        WHERE due_date = CURRENT_DATE AND status IN ('pending','partial','missed')`,
+      `SELECT COALESCE(sum(balance.shortfall - balance.overdue),0)::text AS s
+         FROM loans l ${loanBalanceJoin} WHERE l.status = 'active'`,
     );
     return Number(rows[0].s);
   },
 
   async todaysMissed(): Promise<number> {
     const { rows } = await query<{ c: string }>(
-      `SELECT count(*)::text AS c
-         FROM emi_schedule
-        WHERE due_date < CURRENT_DATE AND status IN ('pending','partial','missed')`,
+      `SELECT COALESCE(sum(coverage.missed_count),0)::text AS c
+         FROM loans l ${loanBalanceJoin} WHERE l.status = 'active'`,
     );
     return Number(rows[0].c);
   },

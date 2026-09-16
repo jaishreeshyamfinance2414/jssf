@@ -5,6 +5,7 @@ import { ledgerService } from '../accounts/ledger.service';
 import { audit } from '../audit/audit.service';
 import { customerRepository } from '../customers/customer.repository';
 import { collectionRepository } from '../collections/collection.repository';
+import { reconcileHistoricalPenalties } from '../collections/statement-history';
 import { LoanNumberSetting, settingsRepository } from '../settings/settings.repository';
 import { CreateLoanBody } from './loan.schema';
 import { UpdateLoanBody, CloseLoanBody } from './loan.schema';
@@ -209,7 +210,10 @@ export const loanService = {
       // An active loan may already have collections against it — shrinking the
       // total below what's collected would make the remaining balance negative.
       const collected = await collectionRepository.totalCollectedForLoan(id, client);
-      if (totalPayable < collected) {
+      const { rows: penaltyRows } = await client.query(`SELECT COALESCE(sum(amount),0) AS amount
+        FROM loan_daily_penalties WHERE loan_id = $1`,[id]);
+      const accruedPenalty = Number(penaltyRows[0].amount);
+      if (totalPayable + accruedPenalty < collected) {
         throw BadRequest(
           `Total EMI return (${totalPayable}) cannot be less than the amount already collected (${collected})`,
         );
@@ -223,7 +227,7 @@ export const loanService = {
           principal,
           interestRate,
           interestAmount,
-          totalPayable,
+          totalPayable: totalPayable + accruedPenalty,
           emiAmount,
           emiFrequency,
           tenureCount,
@@ -240,6 +244,8 @@ export const loanService = {
           totalPayable,
           client,
         );
+        await collectionRepository.rebuildEmiState(id, client);
+        await collectionRepository.reconcileStatementCoverage(id, client);
       }
       await audit(
         {
@@ -312,7 +318,9 @@ export const loanService = {
       if (!loan) throw NotFound('Loan not found');
       if (loan.status !== 'active') throw BadRequest('Only active loans can be closed');
 
-      const totalPayable = Number(loan.total_payable);
+      await reconcileHistoricalPenalties(id, client);
+      const currentLoan = await loanRepository.lockForUpdate(id, client);
+      const totalPayable = Number(currentLoan.total_payable);
       const collected = await collectionRepository.totalCollectedForLoan(id, client);
       const remaining = Number((totalPayable - collected).toFixed(2));
 

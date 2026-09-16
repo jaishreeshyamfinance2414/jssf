@@ -115,7 +115,7 @@ export default function SettingsPage() {
           <div className="rounded-md border p-3">
             {editing ? (
               <div className="space-y-2">
-                <label className="font-medium text-foreground">Penalty % per missed day</label>
+                <label className="font-medium text-foreground">Daily penalty % when shortfall exceeds 3 EMIs</label>
                 <div className="flex items-center gap-2">
                   <Input
                     type="number"
@@ -143,7 +143,7 @@ export default function SettingsPage() {
             ) : (
               <div className="flex items-center justify-between">
                 <span>
-                  Penalty: {loadingSettings ? '…' : <span className="font-medium text-foreground">{penaltyDisplay}</span>} per missed day
+                  Penalty: {loadingSettings ? '…' : <span className="font-medium text-foreground">{penaltyDisplay}</span>} per day when shortfall exceeds 3 EMIs
                 </span>
                 {isAdmin && (
                   <button onClick={startEdit} className="text-muted-foreground hover:text-foreground transition-colors" title="Edit penalty rate">
@@ -169,7 +169,7 @@ export default function SettingsPage() {
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
               The penalty sweep runs automatically every hour. Use this button to trigger it instantly — it will mark
-              overdue EMIs as missed, apply penalties (from 2nd consecutive miss onwards), and mature advance payments.
+              uncovered days as missed and apply one daily penalty when scheduled EMI dues plus previously accrued penalties minus all receipts through that date exceeds 3 EMIs. Daily checks continue after maturity until full settlement or manual closure; no extra EMI debt is added.
             </p>
             <Button onClick={runSweep} disabled={sweeping}>
               {sweeping ? 'Running Sweep…' : 'Run Penalty Sweep Now'}

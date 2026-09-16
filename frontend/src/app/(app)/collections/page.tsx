@@ -22,6 +22,7 @@ interface Due {
   customer_mobile: string;
   due_date: string;
   due_amount: string;
+  collection_due: string;
   paid_amount: string;
   status: string;
   principal: string;
@@ -344,10 +345,10 @@ export default function CollectionsPage() {
           money(d.received),
           money(d.remaining),
           <div key={`${d.id}-btn`} className="flex flex-wrap gap-2">
-            <Button size="sm" disabled={record.isPending} onClick={() => record.mutate({ loanId: d.loan_id, emiId: d.id, amount: Number(d.due_amount) - Number(d.paid_amount), mode: 'cash' })}>
+            <Button size="sm" disabled={record.isPending} onClick={() => record.mutate({ loanId: d.loan_id, emiId: d.id, amount: Number(d.collection_due), mode: 'cash' })}>
               {pendingEmiId === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Cash
             </Button>
-            <Button size="sm" variant="outline" disabled={record.isPending} onClick={() => record.mutate({ loanId: d.loan_id, emiId: d.id, amount: Number(d.due_amount) - Number(d.paid_amount), mode: 'bank_transfer' })}>
+            <Button size="sm" variant="outline" disabled={record.isPending} onClick={() => record.mutate({ loanId: d.loan_id, emiId: d.id, amount: Number(d.collection_due), mode: 'bank_transfer' })}>
               {pendingEmiId === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null} UPI/Bank
             </Button>
             {d.status !== 'missed' && (
@@ -456,11 +457,11 @@ export default function CollectionsPage() {
               c.loan_number,
               c.customer_name,
               money(c.amount),
-              c.type === 'missed'
-                ? <span key={`${c.id}-pen`} className="font-medium text-danger">+{money(c.missed_penalty ?? 0)}</span>
+              Number(c.missed_penalty) > 0
+                ? <span key={`${c.id}-pen`}><span className="font-medium text-danger">+{money(c.missed_penalty ?? 0)} added</span>{Number(c.penalty) > 0 && <span className="block text-xs">{money(c.penalty)} collected</span>}</span>
                 : money(c.penalty),
               <StatusPill key={`${c.id}-type`} value={TYPE_LABEL[c.type] ?? c.type} />,
-              Number(c.amount) === 0 ? '-' : c.mode === 'cash' ? 'Cash' : 'UPI/Bank',
+              Number(c.amount) + Number(c.penalty) === 0 ? '-' : c.mode === 'cash' ? 'Cash' : 'UPI/Bank',
               isCoverageMarker ? 'Automatic' : c.agent_name ?? '-',
               <div key={c.id} className="flex flex-wrap gap-2">
                 {isCoverageMarker && user?.role !== 'admin' ? (

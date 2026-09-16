@@ -1,5 +1,7 @@
 import { PoolClient } from 'pg';
 import { query } from '../../db/pool';
+import { historyCtes } from '../collections/statement-history';
+import { loanBalanceJoin } from './loan-balance';
 
 export type EmiFrequency = 'daily' | 'weekly' | 'monthly';
 export type LoanStatus = 'pending' | 'approved' | 'rejected' | 'active' | 'closed';
@@ -82,10 +84,14 @@ export const loanRepository = {
   async findById(id: string) {
     const { rows } = await query(
       `SELECT l.*, c.full_name AS customer_name, c.mobile AS customer_mobile, c.area_id,
-              a.name AS area_name
+              a.name AS area_name, receipts.received AS received_till_today,
+              dues.expected AS expected_till_today, balance.shortfall AS due_till_today,
+              balance.advance AS advance_balance, balance.remaining AS remaining,
+              dues.penalty AS total_penalty, CURRENT_DATE::text AS business_date
          FROM loans l
          JOIN customers c ON c.id = l.customer_id
          LEFT JOIN areas a ON a.id = c.area_id
+         ${loanBalanceJoin}
         WHERE l.id = $1`,
       [id],
     );
@@ -103,11 +109,9 @@ export const loanRepository = {
       `SELECT l.id, l.loan_number, l.principal, l.interest_rate, l.status, l.emi_frequency, l.tenure_count,
               l.emi_amount, l.total_payable, l.loan_date, l.closed_at, l.waiver_amount, l.created_at,
               c.full_name AS customer_name, c.mobile AS customer_mobile,
-              GREATEST(0, l.total_payable - COALESCE((
-                SELECT sum(amount) FROM collections WHERE loan_id = l.id
-              ), 0))::text AS remaining,
-              (SELECT max(due_date) FROM emi_schedule WHERE loan_id = l.id)::text AS closing_date
+              balance.remaining::text, dues.closing_date::text
          FROM loans l JOIN customers c ON c.id = l.customer_id
+         ${loanBalanceJoin}
         WHERE ($1::loan_status IS NULL OR l.status = $1)
         ORDER BY l.created_at DESC
         LIMIT 300`,
@@ -124,26 +128,28 @@ export const loanRepository = {
       `SELECT l.id, l.loan_number, l.principal, l.emi_amount, l.emi_frequency, l.tenure_count,
               l.status, c.full_name AS customer_name, c.mobile AS customer_mobile, c.file_number,
               c.guarantor_name, c.guarantor_mobile,
-              GREATEST(0, l.total_payable - COALESCE((
-                SELECT sum(amount) FROM collections WHERE loan_id = l.id
-              ), 0))::text AS loan_remaining,
+              balance.remaining::text AS loan_remaining,
+              dues.expected::text AS expected_till_today, balance.shortfall::text AS due_till_today,
               COALESCE((
                 SELECT jsonb_build_object(
                   'id', e.id,
                   'dueDate', e.due_date,
                   'dueAmount', e.due_amount,
                   'paidAmount', e.paid_amount,
-                  'remainingAmount', e.due_amount - e.paid_amount,
+                  'remainingAmount', LEAST(l.emi_amount,CASE WHEN balance.shortfall > 0
+                    THEN balance.shortfall ELSE balance.remaining END),
                   'status', e.status
                 )
                 FROM emi_schedule e
                 WHERE e.loan_id = l.id
-                  AND e.status IN ('pending','partial','missed')
+                  AND e.due_date = COALESCE(coverage.next_due_date,
+                    CASE WHEN balance.shortfall > 0 THEN dues.closing_date END)
                 ORDER BY e.due_date ASC, e.installment_no ASC
                 LIMIT 1
               ), NULL) AS next_emi
          FROM loans l
          JOIN customers c ON c.id = l.customer_id
+         ${loanBalanceJoin}
         WHERE l.status = 'active'
           AND (
             c.full_name ILIKE '%' || $1 || '%'
@@ -308,13 +314,14 @@ export const loanRepository = {
     // yet 'paid', and must count toward closure. Missed-day penalties live on
     // total_payable but NOT on EMI due_amounts, so closure additionally
     // requires the collected total to cover total_payable (base + penalties).
-    const { rows } = await client.query<{ remaining: string; shortfall: string }>(
-      `SELECT (SELECT count(*) FROM emi_schedule WHERE loan_id = $1 AND paid_amount < due_amount)::text AS remaining,
-              (SELECT l.total_payable - COALESCE((SELECT sum(c.amount) FROM collections c WHERE c.loan_id = l.id), 0)
+    const { rows } = await client.query<{ installments: string; shortfall: string }>(
+      `SELECT (SELECT count(*) FROM emi_schedule WHERE loan_id = $1)::text AS installments,
+              (SELECT l.total_payable - COALESCE((SELECT sum(c.amount + c.penalty) FROM collections c WHERE c.loan_id = l.id
+                 AND c.collected_at < CURRENT_DATE::timestamp + interval '1 day'), 0)
                  FROM loans l WHERE l.id = $1)::text AS shortfall`,
       [loanId],
     );
-    if (Number(rows[0].remaining) > 0 || Number(rows[0].shortfall) > 0.01) return false;
+    if (Number(rows[0].installments) === 0 || Number(rows[0].shortfall) > 0) return false;
     await client.query(`UPDATE loans SET status = 'closed', closed_at = now() WHERE id = $1`, [loanId]);
     return true;
   },
@@ -381,9 +388,21 @@ export const loanRepository = {
 
   async collectionsFor(loanId: string) {
     const { rows } = await query(
-      `SELECT co.*, COALESCE(agent.full_name, creator.full_name, 'Automatic') AS agent_name,
-              e.installment_no, e.due_date, e.due_amount, e.status AS emi_status, e.missed_penalty
+      `WITH ${historyCtes(true, true)}
+       SELECT co.*, co.collected_at::date::text AS entry_date,
+              r.due_by_day AS expected_by_day, r.received_by_day AS received_by_day,
+              CASE WHEN r.received_by_day > r.due_by_day THEN 'advance'
+                   WHEN co.amount + co.penalty = 0 AND r.received_by_day < r.due_by_day THEN 'missed'
+                   WHEN co.amount + co.penalty > 0 AND (r.received_by_day < r.due_by_day
+                     OR r.received_by_day - r.day_received < r.due_by_day - r.day_due) THEN 'delayed'
+                   ELSE 'on_time' END AS timing,
+              COALESCE(agent.full_name, creator.full_name, 'Automatic') AS agent_name,
+              e.installment_no, COALESCE(e.due_date,co.collected_at::date) AS due_date,
+              e.due_amount, e.status AS emi_status,
+              COALESCE((SELECT p.amount FROM loan_daily_penalties p
+                WHERE p.loan_id = co.loan_id AND p.penalty_date = co.collected_at::date),0) AS missed_penalty
          FROM collections co
+         JOIN running r ON r.loan_id = co.loan_id AND r.day = co.collected_at::date
          LEFT JOIN users agent ON agent.id = co.agent_id
          LEFT JOIN users creator ON creator.id = co.created_by
          LEFT JOIN emi_schedule e ON e.id = co.emi_id
