@@ -397,9 +397,9 @@ export const collectionService = {
       // penalties from dated receipts below instead of waiving them here.
 
       await collectionRepository.rebuildEmiState(collection.loan_id, client);
-      // Keep the date available for a replacement now; the next sweep restores
-      // its automatic entry from dated receipts if no replacement is recorded.
-      await collectionRepository.reconcileStatementCoverage(collection.loan_id, client, collection.collected_at);
+      // Statement coverage (auto-marking missed/advance days) is intentionally
+      // NOT reconciled here. Let the hourly sweep handle it so the admin has a
+      // clean window to record a corrected entry without auto-entries appearing.
 
       // If this collection had auto-closed the loan (closed_by stays NULL for
       // markClosedIfFullyPaid closures), reopen it.
