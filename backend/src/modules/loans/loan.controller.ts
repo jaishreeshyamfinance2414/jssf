@@ -29,7 +29,7 @@ export const loanController = {
   },
 
   async update(req: Request, res: Response) {
-    return ok(res, await loanService.update(req.params.id, req.body, req.user!.sub, req.ip));
+    return ok(res, await loanService.update(req.params.id, req.body, req.user!.sub, req.ip, req.user!.role));
   },
 
   async approve(req: Request, res: Response) {

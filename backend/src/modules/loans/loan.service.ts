@@ -191,7 +191,7 @@ export const loanService = {
     });
   },
 
-  async update(id: string, input: UpdateLoanBody, actorId: string, ip?: string | null) {
+  async update(id: string, input: UpdateLoanBody, actorId: string, ip?: string | null, actorRole?: string) {
     return withTransaction(async (client) => {
       const loan = await loanRepository.lockForUpdate(id, client);
       if (!loan) throw NotFound('Loan not found');
@@ -200,6 +200,13 @@ export const loanService = {
       }
 
       const principal = input.principal ?? Number(loan.principal);
+      const loanDate = input.loanDate ?? String(loan.loan_date).slice(0, 10);
+      const dateChanged = loanDate !== String(loan.loan_date).slice(0, 10);
+      if (input.loanDate && (!Number.isFinite(Date.parse(loanDate)) || new Date(loanDate).toISOString().slice(0, 10) !== loanDate)) {
+        throw BadRequest('Invalid loan date.');
+      }
+      if (loanDate > new Date().toISOString().slice(0, 10)) throw BadRequest('Loan date cannot be in the future.');
+      if (dateChanged && actorRole !== 'admin') throw BadRequest('Only admins can change a loan date.');
       const emiFrequency = input.emiFrequency ?? loan.emi_frequency;
       const tenureCount = input.tenureCount ?? Number(loan.tenure_count);
       const emiAmount = input.emiAmount ?? Number(loan.emi_amount);
@@ -221,6 +228,38 @@ export const loanService = {
       const interestAmount = Number((totalPayable - principal).toFixed(2));
       const interestRate = principal > 0 ? Number(((interestAmount / principal) * 100).toFixed(3)) : 0;
 
+      if (loan.status === 'active') {
+        const { rows: earlyCollections } = await client.query(
+          `SELECT 1 FROM collections WHERE loan_id = $1 AND collected_at::date < $2::date
+             AND (amount + penalty > 0 OR created_by IS NOT NULL) LIMIT 1`,
+          [id, loanDate],
+        );
+        if (earlyCollections.length) throw BadRequest('Loan date cannot be after an existing collection date.');
+
+        const { rows: disbursements } = await client.query<{ id: string; account_id: string }>(
+          `SELECT id, account_id FROM account_transactions
+            WHERE source = 'loan_disbursement' AND reference_id = $1 FOR UPDATE`,
+          [id],
+        );
+        if (disbursements.length !== 1) throw BadRequest('Loan disbursement ledger entry is missing or duplicated.');
+        const disbursement = disbursements[0];
+        await accountsRepository.lockForUpdate(disbursement.account_id, client);
+        await client.query(
+          `UPDATE account_transactions SET amount = $2, txn_date = $3::date WHERE id = $1`,
+          [disbursement.id, principal, loanDate],
+        );
+        const { rows: negativeBalances } = await client.query(
+          `WITH daily AS (
+             SELECT txn_date, sum(CASE WHEN direction = 'credit' THEN amount ELSE -amount END) AS movement
+               FROM account_transactions WHERE account_id = $1 GROUP BY txn_date
+           ), running AS (
+             SELECT txn_date, sum(movement) OVER (ORDER BY txn_date) AS balance FROM daily
+           ) SELECT 1 FROM running WHERE txn_date >= $2::date AND balance < 0 LIMIT 1`,
+          [disbursement.account_id, loanDate],
+        );
+        if (negativeBalances.length) throw BadRequest('Corrected disbursement would make the account balance negative.');
+      }
+
       await loanRepository.updateTerms(
         id,
         {
@@ -232,20 +271,35 @@ export const loanService = {
           emiFrequency,
           tenureCount,
           durationDays: durationFor(emiFrequency, tenureCount),
+          loanDate,
         },
         client,
       );
       if (loan.status === 'active') {
         await loanRepository.rescheduleOpenEmis(
           id,
-          loan.loan_date,
+          loanDate,
           emiFrequency,
+          tenureCount,
           emiAmount,
           totalPayable,
           client,
         );
+        if (dateChanged) {
+          await client.query(
+            `DELETE FROM collections WHERE loan_id = $1 AND collected_at::date < $2::date
+               AND amount = 0 AND penalty = 0 AND created_by IS NULL`,
+            [id, loanDate],
+          );
+        }
         await collectionRepository.rebuildEmiState(id, client);
         await collectionRepository.reconcileStatementCoverage(id, client);
+        const { rows: reconciled } = await client.query<{ total_payable: string }>(
+          `SELECT total_payable::text FROM loans WHERE id = $1`, [id],
+        );
+        if (Number(reconciled[0].total_payable) + 0.01 < collected) {
+          throw BadRequest('Corrected loan total cannot be less than collections already recorded.');
+        }
       }
       await audit(
         {
@@ -253,12 +307,12 @@ export const loanService = {
           action: 'UPDATE',
           entity: 'loan',
           entityId: id,
-          meta: { principal, emiAmount, tenureCount, totalPayable, interestAmount, interestRate, emiFrequency },
+          meta: { principal, emiAmount, tenureCount, totalPayable, interestAmount, interestRate, emiFrequency, loanDate },
           ip,
         },
         client,
       );
-      return loanRepository.findById(id);
+      return loanRepository.findById(id, client);
     });
   },
 
@@ -370,6 +424,11 @@ export const loanService = {
 
       const account = await accountsRepository.getByType(mode === 'cash' ? 'cash' : 'bank', client);
       const principal = Number(loan.principal);
+      const startDate = loanDate ?? new Date().toISOString().slice(0, 10);
+      if (!Number.isFinite(Date.parse(startDate)) || new Date(startDate).toISOString().slice(0, 10) !== startDate
+          || startDate > new Date().toISOString().slice(0, 10)) {
+        throw BadRequest('Loan date must be a valid date no later than today.');
+      }
 
       // Debit the full principal from the account — the customer receives the
       // entire loan amount, no fee deducted.
@@ -381,10 +440,11 @@ export const loanService = {
         referenceId: id,
         description: `Loan disbursed ${loan.loan_number}`,
         createdBy: actorId,
+        txnDate: startDate,
       });
 
-      const startDate = loanDate ?? new Date().toISOString().slice(0, 10);
-      await loanRepository.markDisbursed(id, mode, actorId, startDate, Number(loan.duration_days), client);
+      await loanRepository.markDisbursed(id, mode, actorId, startDate, Number(loan.duration_days), client,
+        loanDate ? `${startDate}T12:00:00` : undefined);
       await loanRepository.generateSchedule(
         id,
         startDate,

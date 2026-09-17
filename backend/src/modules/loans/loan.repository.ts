@@ -32,6 +32,7 @@ export interface UpdateLoanTermsInput {
   emiFrequency: EmiFrequency;
   tenureCount: number;
   durationDays: number;
+  loanDate: string;
 }
 
 const FREQUENCY_UNIT: Record<EmiFrequency, string> = {
@@ -81,8 +82,8 @@ export const loanRepository = {
     return rows[0];
   },
 
-  async findById(id: string) {
-    const { rows } = await query(
+  async findById(id: string, client?: PoolClient) {
+    const sql =
       `SELECT l.*, c.full_name AS customer_name, c.mobile AS customer_mobile, c.area_id,
               a.name AS area_name, receipts.received AS received_till_today,
               dues.total_payable AS total_payable,
@@ -93,15 +94,14 @@ export const loanRepository = {
          JOIN customers c ON c.id = l.customer_id
          LEFT JOIN areas a ON a.id = c.area_id
          ${loanBalanceJoin}
-        WHERE l.id = $1`,
-      [id],
-    );
+        WHERE l.id = $1`;
+    const { rows } = client ? await client.query(sql, [id]) : await query(sql, [id]);
     return rows[0] ?? null;
   },
 
   /** Lock the loan row for the duration of an approval/disbursement transaction. */
   async lockForUpdate(id: string, client: PoolClient) {
-    const { rows } = await client.query(`SELECT * FROM loans WHERE id = $1 FOR UPDATE`, [id]);
+    const { rows } = await client.query(`SELECT *, loan_date::text AS loan_date FROM loans WHERE id = $1 FOR UPDATE`, [id]);
     return rows[0] ?? null;
   },
 
@@ -193,7 +193,10 @@ export const loanRepository = {
               emi_amount = $6,
               emi_frequency = $7,
               tenure_count = $8,
-              duration_days = $9
+              duration_days = $9,
+              loan_date = $10::date,
+              disbursed_at = CASE WHEN disbursed_at IS NULL THEN NULL
+                ELSE ($10::date + disbursed_at::time)::timestamptz END
         WHERE id = $1`,
       [
         id,
@@ -205,6 +208,7 @@ export const loanRepository = {
         input.emiFrequency,
         input.tenureCount,
         input.durationDays,
+        input.loanDate,
       ],
     );
   },
@@ -213,53 +217,54 @@ export const loanRepository = {
     loanId: string,
     loanDate: string,
     frequency: EmiFrequency,
+    tenureCount: number,
     emiAmount: number,
     totalPayable: number,
     client: PoolClient,
   ) {
-    const { rows: paidRows } = await client.query<{ paid: string; closed_count: string }>(
-      `SELECT COALESCE(sum(paid_amount),0)::text AS paid,
-              count(*) FILTER (WHERE status = 'paid')::text AS closed_count
-         FROM emi_schedule
-        WHERE loan_id = $1`,
-      [loanId],
-    );
-    const paid = Number(paidRows[0].paid);
-
-    const { rows: openRows } = await client.query<{ id: string; installment_no: number }>(
-      `SELECT id, installment_no
-         FROM emi_schedule
-        WHERE loan_id = $1
-          AND status IN ('pending','partial','missed')
-        ORDER BY installment_no`,
-      [loanId],
-    );
-    if (!openRows.length) return;
-
-    const remainingPayable = Math.max(0, Number((totalPayable - paid).toFixed(2)));
-    const normalAmount = Math.min(emiAmount, remainingPayable);
+    // The schedule is the contract used by balances and penalties. Rebuild all
+    // installments, including paid/advance rows, before reallocating receipts.
     const unit = FREQUENCY_UNIT[frequency];
-
-    for (let i = 0; i < openRows.length; i += 1) {
-      const row = openRows[i];
-      const isLast = i === openRows.length - 1;
-      const amountBeforeLast = normalAmount * (openRows.length - 1);
-      const dueAmount = isLast
-        ? Math.max(0, Number((remainingPayable - amountBeforeLast).toFixed(2)))
-        : normalAmount;
-      await client.query(
-        `UPDATE emi_schedule
-            SET due_amount = GREATEST($2::numeric, paid_amount),
-                due_date = ($3::date + (($4::int - 1) || ' ${unit}')::interval)::date,
-                status = CASE
-                  WHEN paid_amount >= GREATEST($2::numeric, paid_amount) THEN 'paid'::emi_status
-                  WHEN paid_amount > 0 THEN 'partial'::emi_status
-                  ELSE 'pending'::emi_status
-                END
-          WHERE id = $1`,
-        [row.id, dueAmount, loanDate, row.installment_no],
-      );
-    }
+    await client.query(
+      `WITH installments AS (
+         SELECT n::int AS installment_no,
+                ($2::date + ((n - 1) || ' ${unit}')::interval)::date AS due_date,
+                CASE WHEN n = $3::int THEN $5::numeric - ($3::int - 1) * $4::numeric
+                     ELSE $4::numeric END AS due_amount
+           FROM generate_series(1, $3::int) AS n
+       )
+       INSERT INTO emi_schedule(loan_id, installment_no, due_date, due_amount)
+       SELECT $1, installment_no, due_date, due_amount FROM installments
+       ON CONFLICT (loan_id, installment_no) DO UPDATE
+         SET due_date = EXCLUDED.due_date, due_amount = EXCLUDED.due_amount`,
+      [loanId, loanDate, tenureCount, emiAmount, totalPayable],
+    );
+    // A collection is historical evidence even when its old installment is
+    // removed. Attach it to the final valid installment before deleting rows.
+    await client.query(
+      `UPDATE collections c SET emi_id =
+           (SELECT id FROM emi_schedule WHERE loan_id = $1 AND installment_no = $2)
+         FROM emi_schedule old_emi
+        WHERE old_emi.id = c.emi_id AND old_emi.loan_id = $1
+          AND old_emi.installment_no > $2`,
+      [loanId, tenureCount],
+    );
+    await client.query(
+      `DELETE FROM emi_schedule WHERE loan_id = $1 AND installment_no > $2`,
+      [loanId, tenureCount],
+    );
+    await client.query(
+      `UPDATE collections c SET emi_id = (
+         SELECT e.id FROM emi_schedule e
+          WHERE e.loan_id = c.loan_id AND e.due_date = c.collected_at::date
+          ORDER BY e.installment_no LIMIT 1)
+        WHERE c.loan_id = $1 AND c.amount = 0 AND c.penalty = 0
+          AND c.created_by IS NULL AND c.note IN (
+            'Auto-marked: no collection recorded for this day',
+            'Auto-marked: installment covered by advance payment',
+            'Auto-marked: advance coverage completed on time')`,
+      [loanId],
+    );
   },
 
   async reject(id: string, reason: string, client: PoolClient) {

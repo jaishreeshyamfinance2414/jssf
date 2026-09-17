@@ -126,7 +126,7 @@ export default function LoansPage() {
   const [info, setInfo] = useState<string | null>(null);
   const [form, setForm] = useState({ customerId: '', principal: '', emiFrequency: 'daily', tenureCount: '120', emiAmount: '', loanDate: new Date().toISOString().slice(0, 10), disbursedMode: 'cash' as string });
   const [edit, setEdit] = useState<Loan | null>(null);
-  const [editForm, setEditForm] = useState({ principal: '', emiFrequency: 'daily', tenureCount: '120', emiAmount: '' });
+  const [editForm, setEditForm] = useState({ principal: '', emiFrequency: 'daily', tenureCount: '120', emiAmount: '', loanDate: '' });
   const [historyLoan, setHistoryLoan] = useState<Loan | null>(null);
   const historyRef = useRef<HTMLDivElement | null>(null);
   const [closingLoan, setClosingLoan] = useState<Loan | null>(null);
@@ -187,11 +187,15 @@ export default function LoansPage() {
         emiFrequency: editForm.emiFrequency,
         tenureCount: Number(editForm.tenureCount),
         emiAmount: Number(editForm.emiAmount),
+        loanDate: editForm.loanDate,
       }),
     onSuccess: () => {
       setError(null);
       setEdit(null);
       qc.invalidateQueries({ queryKey: ['loans'] });
+      qc.invalidateQueries({ queryKey: ['loan-detail'] });
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-summary'] });
     },
     onError: (err) => {
       const ax = err as AxiosError<{ error?: { message?: string } }>;
@@ -273,6 +277,7 @@ export default function LoansPage() {
       emiFrequency: loan.emi_frequency,
       tenureCount: String(loan.tenure_count),
       emiAmount: String(loan.emi_amount),
+      loanDate: String(loan.loan_date).slice(0, 10),
     });
   };
   const summary = history ? buildPaymentSummary(history) : null;
@@ -401,6 +406,10 @@ export default function LoansPage() {
               </select>
               <Input type="number" placeholder={editForm.emiFrequency === 'daily' ? 'Total days / EMIs' : 'Total EMIs'} value={editForm.tenureCount} onChange={(e) => setEditForm({ ...editForm, tenureCount: e.target.value })} required />
               <Input type="number" placeholder={editForm.emiFrequency === 'daily' ? 'Per day EMI amount' : 'Per EMI amount'} value={editForm.emiAmount} onChange={(e) => setEditForm({ ...editForm, emiAmount: e.target.value })} required />
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Loan Date</label>
+                <Input type="date" value={editForm.loanDate} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setEditForm({ ...editForm, loanDate: e.target.value })} disabled={user?.role !== 'admin'} required />
+              </div>
               <div className="flex gap-2">
                 <Button disabled={update.isPending}>Save</Button>
                 <Button type="button" variant="outline" onClick={() => setEdit(null)}>Cancel</Button>

@@ -242,6 +242,48 @@ test('historical statement coverage, corrections and penalties', async () => {
       const branch = (await db.query("INSERT INTO branches(name,code) VALUES ('Test branch','TEST') RETURNING id")).rows[0].id;
       await db.query("INSERT INTO accounts(branch_id,name,type) VALUES ($1,'Test cash','cash')",[branch]);
       const today = (await db.query('SELECT CURRENT_DATE::text AS day')).rows[0].day;
+      // Correct a swapped 500-day / ₹120 EMI loan after a real collection.
+      // The contract, dated disbursement, cash balance and profit must agree.
+      const cashAccount = (await db.query("SELECT id FROM accounts WHERE name='Test cash'")).rows[0].id;
+      const swapLoan = (await db.query(`INSERT INTO loans(loan_number,customer_id,principal,duration_days,
+        emi_amount,total_payable,interest_amount,emi_frequency,tenure_count,status,loan_date,disbursed_at)
+        VALUES ('SWAPPED',$1,50000,500,120,60000,10000,'daily',500,'active',CURRENT_DATE-2,
+          CURRENT_DATE-2+interval '12 hours') RETURNING id`,[customer])).rows[0].id;
+      await db.query(`INSERT INTO account_transactions(account_id,direction,amount,source,txn_date)
+        VALUES ($1,'credit',1000000,'capital',CURRENT_DATE-10)`,[cashAccount]);
+      await db.query(`INSERT INTO account_transactions(account_id,direction,amount,source,reference_id,txn_date)
+        VALUES ($1,'debit',50000,'loan_disbursement',$2,CURRENT_DATE-2)`,[cashAccount,swapLoan]);
+      await db.query(`INSERT INTO emi_schedule(loan_id,installment_no,due_date,due_amount)
+        SELECT $1,n,CURRENT_DATE-3+n,120 FROM generate_series(1,500)n`,[swapLoan]);
+      await db.query(`INSERT INTO collections(loan_id,emi_id,amount,type,mode,collected_at)
+        SELECT $1,id,120,'full','cash',CURRENT_DATE-2+interval '10 hours'
+          FROM emi_schedule WHERE loan_id=$1 AND installment_no=1`,[swapLoan]);
+      await db.query(`INSERT INTO account_transactions(account_id,direction,amount,source,txn_date)
+        VALUES ($1,'credit',120,'collection',CURRENT_DATE-2)`,[cashAccount]);
+      const correctedDate = (await db.query("SELECT (CURRENT_DATE-3)::text AS day")).rows[0].day;
+      const { loanService } = require('../dist/modules/loans/loan.service');
+      await loanService.update(swapLoan,{principal:51000,tenureCount:120,emiAmount:500,loanDate:correctedDate},actor,undefined,'admin');
+      const corrected = (await db.query(`SELECT count(*)::int AS count, sum(due_amount)::text AS total,
+        min(due_amount)::text AS minimum, max(due_amount)::text AS maximum
+        FROM emi_schedule WHERE loan_id=$1`,[swapLoan])).rows[0];
+      assert.deepEqual([corrected.count,Number(corrected.total),Number(corrected.minimum),Number(corrected.maximum)],
+        [120,60000,500,500]);
+      const correctedLoan = (await loanRepository.findById(swapLoan));
+      assert.equal(Number(correctedLoan.total_payable),60000);
+      assert.equal(Number(correctedLoan.interest_amount),9000);
+      assert.equal(Number(correctedLoan.received_till_today),120);
+      const debit = (await db.query(`SELECT amount,txn_date::text AS day FROM account_transactions
+        WHERE source='loan_disbursement' AND reference_id=$1`,[swapLoan])).rows[0];
+      assert.equal(Number(debit.amount),51000);
+      assert.equal(debit.day,correctedDate);
+      assert.equal(await dashboardRepository.availableCash(),949120);
+      const correctedProfit = await reportsRepository.profitLoss(correctedDate,correctedDate);
+      assert.equal(correctedProfit.disbursed,51000);
+      assert.equal(correctedProfit.interestBooked,9000);
+      await assert.rejects(loanService.update(swapLoan,{loanDate:today},actor,undefined,'admin'),
+        /after an existing collection date/);
+      assert.equal((await db.query(`SELECT txn_date::text AS day FROM account_transactions
+        WHERE source='loan_disbursement' AND reference_id=$1`,[swapLoan])).rows[0].day,correctedDate);
       const input = {loanId:threshold,amount:200,penalty:0,type:'full',mode:'cash',collectedDate:today};
       const entry = await collectionService.record(input,actor,'admin');
       let actual = (await loanRepository.collectionsFor(threshold)).find(r=>r.id===entry.id);
@@ -354,7 +396,6 @@ test('historical statement coverage, corrections and penalties', async () => {
       assert.equal(recovered.length,1);
       assert.equal(recovered[0].type,'missed');
       // Manual waiver freezes the statement/charges and accounts for penalties.
-      const { loanService } = require('../dist/modules/loans/loan.service');
       await loanService.close(maturedLoan,{waiver:true,reason:'Test settlement'},actor);
       settled = await loanRepository.findById(maturedLoan);
       assert.equal(settled.status,'closed');

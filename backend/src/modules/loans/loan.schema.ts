@@ -15,6 +15,7 @@ export const updateLoanSchema = z.object({
   emiFrequency: z.enum(['daily', 'weekly', 'monthly']).optional(),
   tenureCount: z.coerce.number().int().positive().optional(),
   emiAmount: z.coerce.number().positive().optional(),
+  loanDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
 });
 
 export const rejectLoanSchema = z.object({
