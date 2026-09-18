@@ -158,6 +158,22 @@ in Cloudflare R2 by the application itself and are not copied by this script.
 > An archived copy is kept as `deploy/backup-db-gdrive.sh` — see
 > `deploy/BACKUP-LEGACY.md` if you ever need to restore that flow.
 
+### Restore on a replacement server
+
+Install and start the app on the new server, configure its R2 credentials to
+point at the **original customer-document bucket**, and sign in with the new
+installation's admin account. Before entering business data, open **Settings →
+Backup & Storage → Restore Backup**, upload a `.sql.gz` backup, type `RESTORE`,
+and use the restored admin credentials after the app returns to login. The
+restore replaces the new database in one transaction; a failed SQL restore is
+rolled back. R2 documents are not included in the database archive.
+
+The browser uploads the backup in 8 MB chunks and polls the restore job, so a
+growing backup is not limited by the proxy's per-request upload size or its
+response timeout. Ensure the new server has
+enough temporary disk space for both the compressed backup and its expanded
+SQL file. The server needs `psql` and `pg_dump` from PostgreSQL's client tools.
+
 ---
 
 ## Releasing updates later

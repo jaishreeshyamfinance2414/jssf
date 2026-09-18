@@ -8,6 +8,7 @@ import { PageShell } from '@/components/app/page-shell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { BackupSection } from './backup-section';
 
 interface SweepResult {
   missedMarked: number;
@@ -105,7 +106,7 @@ export default function SettingsPage() {
   const penaltyDisplay = currentPct != null ? `${currentPct}%` : '0.2%';
 
   return (
-    <PageShell title="Settings" description="Business rules for penalty and loan number format.">
+    <PageShell title="Settings" description="Business rules, backups, and storage status.">
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><Settings className="h-4 w-4" /> Business Rules</CardTitle></CardHeader>
         <CardContent className="grid gap-3 text-sm text-muted-foreground md:grid-cols-2">
@@ -157,6 +158,10 @@ export default function SettingsPage() {
           <div className="rounded-md border p-3">Loan format: JSSF-year-sequence</div>
         </CardContent>
       </Card>
+
+      {isAdmin && (
+        <BackupSection />
+      )}
 
       {isAdmin && (
         <Card className="mt-6">

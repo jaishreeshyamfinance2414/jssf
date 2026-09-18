@@ -67,7 +67,7 @@ FAILURE_LOGGED=0
 # ---------------------------------------------------------------------------
 # 1. Dump PostgreSQL and validate the archive
 # ---------------------------------------------------------------------------
-sudo -u postgres pg_dump jssf | gzip > "$FILE"
+sudo -u postgres pg_dump --no-owner --no-privileges jssf | gzip > "$FILE"
 gzip -t "$FILE"
 log "wrote and validated $FILE ($(du -h "$FILE" | cut -f1))"
 
