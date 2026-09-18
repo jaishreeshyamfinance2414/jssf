@@ -51,7 +51,7 @@ export const setPasskeyPrompt = (fn: PasskeyPrompt | null) => {
  */
 export function refreshAccessToken(): Promise<string> {
   refreshing ??= api
-    .post<{ data: { accessToken: string } }>('/auth/refresh')
+    .post<{ data: { accessToken: string } }>('/auth/refresh', undefined, { timeout: 12000 })
     .then((r) => {
       const token = r.data.data.accessToken;
       setAccessToken(token);

@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { apiGet, apiPost, refreshAccessToken, setAccessToken } from './api';
+import { api, apiGet, apiPost, refreshAccessToken, setAccessToken } from './api';
 
 export interface AuthUser {
   id: string;
@@ -38,7 +38,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         await refreshAccessToken();
-        setUser(await apiGet<AuthUser>('/auth/me'));
+        const { data } = await api.get<{ data: AuthUser }>('/auth/me', { timeout: 12000 });
+        setUser(data.data);
       } catch {
         setUser(null);
       } finally {

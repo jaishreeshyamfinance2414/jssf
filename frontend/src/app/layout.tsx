@@ -16,7 +16,7 @@ export async function generateMetadata(): Promise<Metadata> {
   let faviconVersion: string | null = null;
   try {
     const response = await fetch(`${process.env.API_PROXY_TARGET ?? 'http://localhost:4000'}/api/v1/settings/branding`,
-      { cache: 'no-store' });
+      { cache: 'no-store', signal: AbortSignal.timeout(2500) });
     if (response.ok) {
       const result = await response.json() as { data?: { businessName?: string; faviconVersion?: string | null } };
       businessName = result.data?.businessName || businessName;

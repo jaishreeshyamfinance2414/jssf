@@ -46,38 +46,23 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     document.title = branding.businessName;
 
-    // Keep one canonical icon link. Next may recreate metadata links during
-    // navigation, so remove competing icons whenever the head changes.
-    const favicon = document.getElementById('business-favicon') as HTMLLinkElement | null
-      ?? document.createElement('link');
-    favicon.id = 'business-favicon';
-    favicon.rel = 'icon';
-    favicon.type = branding.faviconVersion ? 'image/png' : 'image/svg+xml';
-    favicon.href = assetUrl('favicon', branding.faviconVersion)!;
-    if (!favicon.isConnected) document.head.appendChild(favicon);
-
-    const appleIcon = document.getElementById('business-apple-icon') as HTMLLinkElement | null
-      ?? document.createElement('link');
-    appleIcon.id = 'business-apple-icon';
-    appleIcon.rel = 'apple-touch-icon';
-    appleIcon.href = assetUrl('favicon', branding.faviconVersion)!;
-    if (!appleIcon.isConnected) document.head.appendChild(appleIcon);
-
-    const removeCompetingIcons = () => {
-      document.head.querySelectorAll<HTMLLinkElement>('link[rel~="icon"]').forEach(link => {
-        if (link !== favicon && link !== appleIcon) link.remove();
-      });
-      document.head.querySelectorAll<HTMLLinkElement>('link[rel="apple-touch-icon"]').forEach(link => {
-        if (link !== appleIcon) link.remove();
-      });
-    };
-    removeCompetingIcons();
-    const observer = new MutationObserver(removeCompetingIcons);
-    observer.observe(document.head, { childList: true });
+    // Next owns the metadata links. Update them in place; removing them during
+    // hydration can interfere with a fresh navigation.
+    const iconUrl = assetUrl('favicon', branding.faviconVersion)!;
+    const iconType = branding.faviconVersion ? 'image/png' : 'image/svg+xml';
+    const icons = document.head.querySelectorAll<HTMLLinkElement>('link[rel="icon"], link[rel="shortcut icon"]');
+    if (icons.length) icons.forEach(link => { link.href = iconUrl; link.type = iconType; });
+    else {
+      const link = document.createElement('link');
+      link.rel = 'icon'; link.type = iconType; link.href = iconUrl;
+      document.head.appendChild(link);
+    }
+    document.head.querySelectorAll<HTMLLinkElement>('link[rel="apple-touch-icon"]').forEach(link => {
+      link.href = iconUrl;
+    });
 
     const appleTitle = document.querySelector<HTMLMetaElement>('meta[name="apple-mobile-web-app-title"]');
     if (appleTitle) appleTitle.content = branding.businessName;
-    return () => observer.disconnect();
   }, [branding.businessName, branding.faviconVersion]);
 
   return <BrandingContext.Provider value={branding}>{children}</BrandingContext.Provider>;
