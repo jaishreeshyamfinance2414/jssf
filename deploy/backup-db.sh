@@ -12,8 +12,10 @@
 # latest result or run the same script immediately; it does not edit crontab.
 # Example: 17 2 * * * /usr/bin/bash /home/ubuntu/jssf/deploy/backup-db.sh
 #
-# Credentials load from ~/.config/jssf/backup.env unless BACKUP_ENV_FILE is set
-# explicitly (see backup.env.example).
+# Database connection loads from backend/.env, using the same selection as the
+# application (DATABASE_URL takes precedence over PGHOST/PGDATABASE/etc.).
+# B2 credentials load from ~/.config/jssf/backup.env unless BACKUP_ENV_FILE is
+# set explicitly (see backup.env.example).
 # If the file is absent or B2 variables are not set, the script still creates a
 # local backup and exits cleanly.
 #
@@ -45,6 +47,8 @@ fi
 # Configuration
 # ---------------------------------------------------------------------------
 BACKUP_DIR="$HOME/backups"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKEND_DIR="$SCRIPT_DIR/../backend"
 LOCAL_KEEP_DAYS=7        # local .gz files older than this are deleted
 LOG_KEEP_DAYS=30         # local per-run logs older than this are deleted
 STAMP="$(date +%Y-%m-%d_%H%M%S)"
@@ -74,10 +78,15 @@ BACKUP_FAILED=0
 FAILURE_LOGGED=0
 
 # ---------------------------------------------------------------------------
-# 1. Dump PostgreSQL and validate the archive
+# 1. Dump the database configured for the application and validate the archive
 # ---------------------------------------------------------------------------
-sudo -u postgres pg_dump --no-owner --no-privileges jssf | gzip > "$FILE"
+if [[ ! -f "$BACKEND_DIR/.env" || ! -f "$BACKEND_DIR/dist/scripts/backup-dump.js" ]]; then
+  log 'ERROR: application database configuration or compiled backup helper is missing'
+  exit 1
+fi
+dump_target="$(cd "$BACKEND_DIR" && node dist/scripts/backup-dump.js "$FILE")"
 gzip -t "$FILE"
+log "$dump_target"
 log "wrote and validated $FILE ($(du -h "$FILE" | cut -f1))"
 
 # ---------------------------------------------------------------------------

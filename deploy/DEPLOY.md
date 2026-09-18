@@ -112,7 +112,7 @@ When it finishes: **https://yourdomain.com** is live (through Cloudflare).
    17 2 * * * /usr/bin/bash /home/ubuntu/jssf/deploy/backup-db.sh >> /home/ubuntu/backups/backup.log 2>&1
    ```
 
-   Settings → Backup & Storage displays the latest readable backup log and offers **Backup Now**. It does not change the server's cron schedule. Backup Now executes the same script as the root cron entry and records its result in the backup logs.
+   Settings → Backup & Storage displays the latest readable backup log and offers **Backup Now**. It does not change the server's cron schedule. Backup Now executes the same script as the root cron entry and records its result in the backup logs. Both runs read the application's database connection from `backend/.env`: `DATABASE_URL` takes precedence over the individual `PG*` settings. The run log names the database and host that were dumped. Deploy the rebuilt backend before running the updated script. To inspect the selected target without creating a backup, run `cd ~/jssf/backend && node dist/scripts/backup-dump.js --show-target`.
 
    If this server previously installed the retired Settings cron manager, first verify that root's crontab still points to `/home/ubuntu/jssf/deploy/backup-db.sh`. The obsolete installed helper, sudoers rule, and copied script can then be removed; they are not used by Backup Now. Keep the existing backup logs.
    ```bash
