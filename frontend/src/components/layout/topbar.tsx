@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Bell, Download, Plus, Menu, Search, X } from 'lucide-react';
 import { GlobalSearch } from './global-search';
+import { useBranding } from '@/lib/branding-context';
 
 const TITLES: Record<string, string> = {
   '/dashboard': 'Dashboard',
@@ -29,10 +30,11 @@ const TITLES: Record<string, string> = {
 const BRANCH = 'Sangam Vihar Branch';
 
 export function Topbar({ onMenu }: { onMenu?: () => void }) {
+  const { businessName } = useBranding();
   const pathname = usePathname();
   const [searchOpen, setSearchOpen] = useState(false);
   const key = Object.keys(TITLES).find((k) => pathname === k || pathname.startsWith(k + '/'));
-  const title = key ? TITLES[key] : 'JSSF';
+  const title = key ? TITLES[key] : businessName;
 
   const today = new Date().toLocaleDateString('en-IN', {
     weekday: 'long',

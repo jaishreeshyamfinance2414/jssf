@@ -3,12 +3,16 @@ import { asyncHandler } from '../../shared/http';
 import { authenticate, requireRole } from '../../middleware/auth';
 import { requirePasskey } from '../../middleware/passkey';
 import { validate } from '../../middleware/validate';
-import { updatePenaltySchema } from './settings.schema';
+import { updatePenaltySchema, updateLoanNumberSchema, updateBrandingSchema } from './settings.schema';
 import { settingsController } from './settings.controller';
 import { BadRequest } from '../../shared/errors';
 import express from 'express';
+import multer from 'multer';
 
 const router = Router();
+router.get('/branding', asyncHandler(settingsController.getBranding));
+router.get('/branding/assets/:kind', asyncHandler(settingsController.getBrandingAsset));
+router.get('/branding/manifest', asyncHandler(settingsController.getBrandingManifest));
 router.use(authenticate);
 
 router.get('/', requireRole('admin'), asyncHandler(settingsController.getAll));
@@ -33,5 +37,12 @@ router.put(
   validate({ body: updatePenaltySchema }),
   asyncHandler(settingsController.updatePenalty),
 );
+router.put('/loan-number', requireRole('admin'), requirePasskey(),
+  validate({ body: updateLoanNumberSchema }), asyncHandler(settingsController.updateLoanNumber));
+router.put('/branding', requireRole('admin'), requirePasskey(),
+  validate({ body: updateBrandingSchema }), asyncHandler(settingsController.updateBranding));
+const brandingUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
+router.put('/branding/assets/:kind', requireRole('admin'), requirePasskey(),
+  brandingUpload.single('image'), asyncHandler(settingsController.uploadBrandingAsset));
 
 export default router;

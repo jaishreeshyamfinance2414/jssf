@@ -5,3 +5,13 @@ export const updatePenaltySchema = z.object({
 });
 
 export type UpdatePenaltyBody = z.infer<typeof updatePenaltySchema>;
+
+export const updateLoanNumberSchema = z.object({
+  prefix: z.string().trim().min(1).max(20).regex(/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/, 'Use letters, numbers, and single hyphens'),
+});
+export type UpdateLoanNumberBody = z.infer<typeof updateLoanNumberSchema>;
+
+export const updateBrandingSchema = z.object({
+  businessName: z.string().trim().min(2).max(100),
+});
+export type UpdateBrandingBody = z.infer<typeof updateBrandingSchema>;

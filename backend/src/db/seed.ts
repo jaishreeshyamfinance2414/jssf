@@ -162,7 +162,7 @@ async function seed() {
     for (const [key, value, desc] of SETTINGS) {
       await c.query(
         `INSERT INTO settings(key,value,description) VALUES ($1,$2,$3)
-         ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`,
+         ON CONFLICT (key) DO NOTHING`,
         [key, JSON.stringify(value), desc],
       );
     }

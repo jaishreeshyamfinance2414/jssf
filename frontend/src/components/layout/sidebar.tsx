@@ -25,6 +25,7 @@ import { Logo } from '@/components/logo';
 import { cn } from '@/lib/utils';
 import { apiGet } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { useBranding } from '@/lib/branding-context';
 
 interface NavItem {
   label: string;
@@ -93,6 +94,7 @@ const ROLE_LABEL: Record<string, string> = {
 export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: () => void }) {
   const pathname = usePathname();
   const { can, user, logout } = useAuth();
+  const { businessName } = useBranding();
 
   // Light shared query (cached across pages) purely to surface the approvals badge.
   const { data: badges } = useQuery({
@@ -137,8 +139,8 @@ export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: (
         {/* Brand */}
         <div className="flex items-center gap-3 px-5 py-5">
         <Logo size={40} />
-        <div className="leading-tight">
-          <p className="font-serif text-[15px] font-semibold text-white">Jai Shree Shyam</p>
+        <div className="min-w-0 leading-tight">
+          <p className="break-words font-serif text-[15px] font-semibold text-white">{businessName}</p>
           <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-sidebar-foreground/70">
             Finance ERP
           </p>

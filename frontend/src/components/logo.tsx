@@ -1,9 +1,11 @@
-import { cn } from '@/lib/utils';
+'use client';
 
-// Brand logo mark. The artwork is navy/gold on white, so it sits inside a
-// white rounded tile — legible on light and dark surfaces alike. With
-// `adaptive`, the tile border follows the surface (subtle on light, none on dark).
+import { cn } from '@/lib/utils';
+import { useBranding } from '@/lib/branding-context';
+
+// Keep uploaded artwork legible on both light and dark surfaces.
 export function Logo({ className, size = 40 }: { className?: string; size?: number }) {
+  const { businessName, logoUrl } = useBranding();
   return (
     <span
       className={cn(
@@ -13,7 +15,7 @@ export function Logo({ className, size = 40 }: { className?: string; size?: numb
       style={{ width: size, height: size }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/logo.png" alt="Jai Shri Shyam Finance" width={size} height={size} />
+      <img src={logoUrl} alt={businessName} width={size} height={size} className="h-full w-full object-contain" />
     </span>
   );
 }

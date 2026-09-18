@@ -1,11 +1,16 @@
 import { NextFunction, Request, Response } from 'express';
 import { ZodError } from 'zod';
 import { AppError } from '../shared/errors';
+import { MulterError } from 'multer';
 import { logger } from '../config/logger';
 import { isProd } from '../config/env';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
+  if (err instanceof MulterError) {
+    return res.status(400).json({ success: false,
+      error: { code: 'UPLOAD_ERROR', message: err.code === 'LIMIT_FILE_SIZE' ? 'File exceeds the upload size limit' : err.message } });
+  }
   if (err instanceof ZodError) {
     return res.status(400).json({
       success: false,

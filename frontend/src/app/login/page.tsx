@@ -9,6 +9,7 @@ import { AxiosError } from 'axios';
 import { Loader2 } from 'lucide-react';
 import { Logo } from '@/components/logo';
 import { useAuth } from '@/lib/auth-context';
+import { useBranding } from '@/lib/branding-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -21,6 +22,7 @@ type FormValues = z.infer<typeof schema>;
 
 export default function LoginPage() {
   const { login, user, loading } = useAuth();
+  const { businessName } = useBranding();
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -51,7 +53,7 @@ export default function LoginPage() {
       <div className="hidden w-1/2 flex-col justify-between bg-sidebar p-12 text-sidebar-foreground lg:flex">
         <div className="flex items-center gap-3">
           <Logo size={44} />
-          <span className="text-xl font-bold text-white">Jai Shree Shyam Finance</span>
+          <span className="text-xl font-bold text-white">{businessName}</span>
         </div>
         <div>
           <h1 className="text-4xl font-bold leading-tight text-white">
@@ -64,7 +66,7 @@ export default function LoginPage() {
           </p>
         </div>
         <p className="text-xs text-sidebar-foreground/60">
-          © {new Date().getFullYear()} Jai Shree Shyam Finance. All rights reserved.
+          © {new Date().getFullYear()} {businessName}. All rights reserved.
         </p>
       </div>
 
@@ -74,7 +76,7 @@ export default function LoginPage() {
           <div className="mb-8 lg:hidden">
             <div className="flex items-center gap-2 text-primary">
               <Logo size={32} />
-              <span className="text-lg font-bold">JSSF</span>
+              <span className="text-lg font-bold">{businessName}</span>
             </div>
           </div>
           <h2 className="text-2xl font-bold">Welcome back</h2>

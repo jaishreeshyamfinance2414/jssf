@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { settingsRepository } from './settings.repository';
-import { UpdatePenaltyBody } from './settings.schema';
+import { UpdatePenaltyBody, UpdateLoanNumberBody, UpdateBrandingBody } from './settings.schema';
 import { audit } from '../audit/audit.service';
 import { ok } from '../../shared/http';
 import { AppError, BadRequest, Conflict } from '../../shared/errors';
@@ -13,6 +13,38 @@ import { logger } from '../../config/logger';
 let backupOperationInProgress = false;
 
 export const settingsController = {
+  async getBranding(_req: Request, res: Response) {
+    res.setHeader('Cache-Control', 'no-store');
+    return ok(res, await settingsRepository.branding());
+  },
+
+  async getBrandingAsset(req: Request, res: Response) {
+    const kind = req.params.kind;
+    if (kind !== 'logo' && kind !== 'favicon') throw BadRequest('Unknown branding asset');
+    const asset = await settingsRepository.getBrandingAsset(kind);
+    if (!asset) return res.redirect(302, kind === 'logo' ? '/logo.png' : '/icon.png');
+    res.setHeader('Content-Type', asset.content_type);
+    res.setHeader('Content-Length', asset.bytes.length);
+    res.setHeader('Cache-Control', 'public, max-age=60');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    return res.end(asset.bytes);
+  },
+
+  async getBrandingManifest(_req: Request, res: Response) {
+    const branding = await settingsRepository.branding();
+    const icon = branding.faviconVersion
+      ? `/api/v1/settings/branding/assets/favicon?v=${encodeURIComponent(branding.faviconVersion)}`
+      : '/icons/icon-192.png';
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Type', 'application/manifest+json');
+    return res.json({ name: branding.businessName, short_name: branding.businessName,
+      description: 'Loan Management System', id: '/', start_url: '/', scope: '/', display: 'standalone',
+      background_color: '#F5F4EF', theme_color: '#12805A',
+      icons: branding.faviconVersion
+        ? [{ src: icon, sizes: 'any', type: 'image/png', purpose: 'any' }]
+        : [{ src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' }] });
+  },
   async getAll(_req: Request, res: Response) {
     const settings = await settingsRepository.getAll();
     return ok(res, settings);
@@ -31,6 +63,49 @@ export const settingsController = {
       ip: req.ip,
     });
     return ok(res, { per_day_pct: body.per_day_pct });
+  },
+
+  async updateLoanNumber(req: Request, res: Response) {
+    const { prefix } = req.body as UpdateLoanNumberBody;
+    const oldValue = await settingsRepository.get<{ prefix: string; pad: number }>('loan_number');
+    const next = { ...oldValue, prefix: prefix.toUpperCase() };
+    await settingsRepository.update('loan_number', next);
+    await audit({ actorId: req.user!.sub, action: 'SETTING_UPDATED', entity: 'setting',
+      entityId: 'loan_number', meta: { old: oldValue, new: next }, ip: req.ip });
+    return ok(res, next);
+  },
+
+  async updateBranding(req: Request, res: Response) {
+    const { businessName } = req.body as UpdateBrandingBody;
+    const old = await settingsRepository.branding();
+    await settingsRepository.update('branding', { businessName });
+    await audit({ actorId: req.user!.sub, action: 'SETTING_UPDATED', entity: 'setting',
+      entityId: 'branding', meta: { old: old.businessName, new: businessName }, ip: req.ip });
+    return ok(res, await settingsRepository.branding());
+  },
+
+  async uploadBrandingAsset(req: Request, res: Response) {
+    const kind = req.params.kind;
+    if (kind !== 'logo' && kind !== 'favicon') throw BadRequest('Unknown branding asset');
+    const file = req.file;
+    if (!file) throw BadRequest('Choose an image to upload');
+    const b = file.buffer;
+    const png = b.length >= 24 && b.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
+    const jpeg = b.length >= 3 && b[0] === 255 && b[1] === 216 && b[2] === 255;
+    const webp = b.length >= 12 && b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP';
+    const valid = (file.mimetype === 'image/png' && png) ||
+      (kind === 'logo' && file.mimetype === 'image/jpeg' && jpeg) ||
+      (kind === 'logo' && file.mimetype === 'image/webp' && webp);
+    if (!valid) throw BadRequest(kind === 'favicon' ? 'Favicon must be a PNG image' : 'Logo must be a PNG, JPEG, or WebP image');
+    if (kind === 'favicon') {
+      const width = b.readUInt32BE(16);
+      const height = b.readUInt32BE(20);
+      if (width !== height || width < 48 || width > 1024) throw BadRequest('Favicon must be a square PNG between 48 and 1024 pixels');
+    }
+    await settingsRepository.putBrandingAsset(kind, file.mimetype, b);
+    await audit({ actorId: req.user!.sub, action: 'SETTING_UPDATED', entity: 'setting',
+      entityId: `branding.${kind}`, meta: { contentType: file.mimetype, bytes: b.length }, ip: req.ip });
+    return ok(res, await settingsRepository.branding());
   },
 
   async checkBackupStorage(req: Request, res: Response) {
