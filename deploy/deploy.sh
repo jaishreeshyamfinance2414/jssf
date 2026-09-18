@@ -41,6 +41,8 @@ npm ci
 npm run build
 
 echo "==> Restarting"
+cd "$APP_DIR"
+bash deploy/install-backup-cron-helper.sh
 pm2 restart jssf-api jssf-web
 pm2 save
 echo "==> Done. Check: pm2 status && pm2 logs --lines 50"

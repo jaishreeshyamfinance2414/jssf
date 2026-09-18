@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { settingsRepository } from './settings.repository';
-import { UpdatePenaltyBody, UpdateLoanNumberBody, UpdateBrandingBody } from './settings.schema';
+import { UpdatePenaltyBody, UpdateLoanNumberBody, UpdateBrandingBody, UpdateBackupCronBody } from './settings.schema';
 import { audit } from '../audit/audit.service';
 import { ok } from '../../shared/http';
 import { AppError, BadRequest, Conflict } from '../../shared/errors';
@@ -9,6 +9,7 @@ import { createDatabaseExport } from './database-export';
 import { restoreDatabase } from './database-restore';
 import { appendRestoreChunk, beginRestore, finishRestoreUpload, restoreUploadStatus, startRestoreUpload } from './restore-upload';
 import { logger } from '../../config/logger';
+import { backupCronStatus, setBackupCron } from './backup-cron.service';
 
 let backupOperationInProgress = false;
 
@@ -51,6 +52,19 @@ export const settingsController = {
   async getAll(_req: Request, res: Response) {
     const settings = await settingsRepository.getAll();
     return ok(res, settings);
+  },
+
+  async getBackupCron(_req: Request, res: Response) {
+    return ok(res, await backupCronStatus());
+  },
+
+  async updateBackupCron(req: Request, res: Response) {
+    const { enabled, time } = req.body as UpdateBackupCronBody;
+    const old = await backupCronStatus();
+    const next = await setBackupCron(enabled, time);
+    await audit({ actorId: req.user!.sub, action: 'SETTING_UPDATED', entity: 'setting',
+      entityId: 'backup_cron', meta: { old, new: next }, ip: req.ip });
+    return ok(res, next);
   },
 
   async updatePenalty(req: Request, res: Response) {

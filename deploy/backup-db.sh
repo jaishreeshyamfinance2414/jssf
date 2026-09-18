@@ -8,11 +8,12 @@
 # Customer documents are stored in Cloudflare R2 by the application itself
 # and are NOT copied by this script. R2 is their primary (and only) store.
 #
-# Install as a cron job (runs 2:17 AM daily):
-#   crontab -e
-#   17 2 * * * /usr/bin/bash /home/ubuntu/jssf/deploy/backup-db.sh >> /home/ubuntu/backups/backup.log 2>&1
+# Install the fixed root cron helper during deployment, then set the daily
+# schedule in Settings → Backup & Storage. The helper installs a root-owned
+# copy of this script at /usr/local/libexec/jssf/backup-db.sh.
 #
-# Credentials are loaded from ~/.config/jssf/backup.env (see backup.env.example).
+# The managed root cron sets BACKUP_ENV_FILE=/etc/jssf/backup.env. An interactive
+# run may instead use ~/.config/jssf/backup.env (see backup.env.example).
 # If the file is absent or B2 variables are not set, the script still creates a
 # local backup and exits cleanly.
 #

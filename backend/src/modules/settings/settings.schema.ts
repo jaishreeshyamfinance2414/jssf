@@ -15,3 +15,9 @@ export const updateBrandingSchema = z.object({
   businessName: z.string().trim().min(2).max(100),
 });
 export type UpdateBrandingBody = z.infer<typeof updateBrandingSchema>;
+
+export const updateBackupCronSchema = z.object({
+  enabled: z.boolean(),
+  time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use a 24-hour time such as 02:17'),
+});
+export type UpdateBackupCronBody = z.infer<typeof updateBackupCronSchema>;

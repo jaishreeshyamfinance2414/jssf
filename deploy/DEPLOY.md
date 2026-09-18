@@ -105,14 +105,11 @@ When it finishes: **https://yourdomain.com** is live (through Cloudflare).
 
 1. Log in as `admin@jssf.local` / `Admin@123` and **change the password**.
 2. Change/disable the seeded agent accounts (`Agent@123`) too.
-3. Set up nightly database backups (finance data — do not skip):
-   ```bash
-   crontab -e
-   # add these lines:
-   HOME=/home/ubuntu
-   PATH=/usr/local/bin:/usr/bin:/bin
-   17 2 * * * /usr/bin/bash /home/ubuntu/jssf/deploy/backup-db.sh >> /home/ubuntu/backups/backup.log 2>&1
-   ```
+3. Open **Settings → Backup & Storage → Scheduled Database Backup**, choose a daily time, and enable the job. Setup installs a root-owned backup script and a restricted cron helper. On an existing server, deploy once to install the helper; if needed, run `bash /home/ubuntu/jssf/deploy/install-backup-cron-helper.sh` as the PM2 owner. Saving in Settings migrates the older manual root crontab entry to the managed entry.
+
+   The installer copies any existing `/home/ubuntu/.config/jssf/backup.env` to root-owned `/etc/jssf/backup.env`. Re-run the installer after changing B2 credentials. Managed backups and logs are written under `/root/backups` and `/var/log/jssf-backup.log`.
+
+   Settings also shows the last backup result, completion time, and recorded error. The managed job writes this status to `/var/lib/jssf/backup-status.tsv`; before its first run, Settings reads the newest existing per-run backup log. Use **Refresh status** to fetch the latest result.
 
 ### Backblaze B2 backup destination (recommended)
 

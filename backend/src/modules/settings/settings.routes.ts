@@ -3,7 +3,7 @@ import { asyncHandler } from '../../shared/http';
 import { authenticate, requireRole } from '../../middleware/auth';
 import { requirePasskey } from '../../middleware/passkey';
 import { validate } from '../../middleware/validate';
-import { updatePenaltySchema, updateLoanNumberSchema, updateBrandingSchema } from './settings.schema';
+import { updatePenaltySchema, updateLoanNumberSchema, updateBrandingSchema, updateBackupCronSchema } from './settings.schema';
 import { settingsController } from './settings.controller';
 import { BadRequest } from '../../shared/errors';
 import express from 'express';
@@ -16,6 +16,9 @@ router.get('/branding/manifest', asyncHandler(settingsController.getBrandingMani
 router.use(authenticate);
 
 router.get('/', requireRole('admin'), asyncHandler(settingsController.getAll));
+router.get('/backup/cron', requireRole('admin'), asyncHandler(settingsController.getBackupCron));
+router.put('/backup/cron', requireRole('admin'), requirePasskey(),
+  validate({ body: updateBackupCronSchema }), asyncHandler(settingsController.updateBackupCron));
 router.get('/backup/check/:provider', requireRole('admin'), asyncHandler((req, res) => {
   if (req.params.provider !== 'b2' && req.params.provider !== 'r2') throw BadRequest('Unknown storage provider');
   return settingsController.checkBackupStorage(req, res);
