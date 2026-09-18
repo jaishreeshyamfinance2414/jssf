@@ -12,7 +12,7 @@ const sora = Sora({
 });
 
 export async function generateMetadata(): Promise<Metadata> {
-  let businessName = 'Jai Shree Shyam Finance';
+  let businessName = 'Upcoming';
   let faviconVersion: string | null = null;
   try {
     const response = await fetch(`${process.env.API_PROXY_TARGET ?? 'http://localhost:4000'}/api/v1/settings/branding`,
@@ -23,15 +23,14 @@ export async function generateMetadata(): Promise<Metadata> {
       faviconVersion = result.data?.faviconVersion ?? null;
     }
   } catch { /* Use defaults until the backend is available. */ }
-  const favicon = faviconVersion
-    ? `/api/v1/settings/branding/assets/favicon?v=${encodeURIComponent(faviconVersion)}`
-    : '/icon.png';
+  const favicon = `/api/v1/settings/branding/assets/favicon${faviconVersion ? `?v=${encodeURIComponent(faviconVersion)}` : ''}`;
   return {
     title: businessName,
     description: 'Loan Management System',
     manifest: '/api/v1/settings/branding/manifest',
     appleWebApp: { capable: true, statusBarStyle: 'default', title: businessName },
-    icons: { icon: favicon, apple: faviconVersion ? favicon : '/icons/apple-touch-icon.png' },
+    icons: { icon: { url: favicon, type: faviconVersion ? 'image/png' : 'image/svg+xml' },
+      apple: faviconVersion ? favicon : undefined },
   };
 }
 

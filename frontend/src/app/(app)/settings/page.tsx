@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @next/next/no-img-element */
 
 import { useEffect, useState } from 'react';
 import { Settings, Zap, Pencil, Check, X } from 'lucide-react';
@@ -236,8 +237,8 @@ export default function SettingsPage() {
         <CardContent className="space-y-4 text-sm">
           <div className="space-y-2"><label htmlFor="business-name" className="font-medium">Business Name</label><div className="flex gap-2"><Input id="business-name" value={businessName} maxLength={100} onChange={e => setBusinessName(e.target.value)} disabled={brandingBusy} /><Button onClick={saveBusinessName} disabled={brandingBusy || businessName.trim() === branding.businessName}>Save</Button></div></div>
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2"><label htmlFor="brand-logo" className="font-medium">Logo upload</label><Input id="brand-logo" type="file" accept="image/png,image/jpeg,image/webp" disabled={brandingBusy} onChange={e => { void uploadBranding('logo', e.target.files?.[0]); e.target.value = ''; }} /><p className="text-xs text-muted-foreground">PNG, JPEG, or WebP, up to 2 MB. Shown on login and in the sidebar.</p></div>
-            <div className="space-y-2"><label htmlFor="brand-favicon" className="font-medium">Favicon upload</label><Input id="brand-favicon" type="file" accept="image/png" disabled={brandingBusy} onChange={e => { void uploadBranding('favicon', e.target.files?.[0]); e.target.value = ''; }} /><p className="text-xs text-muted-foreground">Square PNG, up to 2 MB. Shown in browser tabs and the app icon.</p></div>
+            <div className="space-y-2"><label htmlFor="brand-logo" className="font-medium">Logo upload</label><div className="flex h-16 w-16 items-center justify-center rounded-lg border bg-white">{branding.logoUrl ? <img src={branding.logoUrl} alt="Current business logo" className="h-full w-full object-contain" /> : <span className="text-[9px]">Upcoming</span>}</div><Input id="brand-logo" type="file" accept="image/png,image/jpeg,image/webp" disabled={brandingBusy} onChange={e => { void uploadBranding('logo', e.target.files?.[0]); e.target.value = ''; }} /><p className="text-xs text-muted-foreground">PNG, JPEG, or WebP, up to 2 MB. Shown on login and in the sidebar.</p></div>
+            <div className="space-y-2"><label htmlFor="brand-favicon" className="font-medium">Favicon upload</label><div className="flex h-16 w-16 items-center justify-center rounded-lg border bg-white">{branding.faviconVersion ? <img src={branding.faviconUrl!} alt="Current favicon" className="h-full w-full object-contain" /> : <span className="text-[9px]">Upcoming</span>}</div><Input id="brand-favicon" type="file" accept="image/png" disabled={brandingBusy} onChange={e => { void uploadBranding('favicon', e.target.files?.[0]); e.target.value = ''; }} /><p className="text-xs text-muted-foreground">Square PNG, up to 2 MB. Shown in browser tabs and the app icon.</p></div>
           </div>
           {brandingMessage && <p role="status">{brandingMessage}</p>}
         </CardContent>

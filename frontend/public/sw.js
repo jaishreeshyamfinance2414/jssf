@@ -1,7 +1,7 @@
 // Minimal service worker: required for PWA installability.
 // Network-first for navigations with an offline fallback message;
 // never caches API calls (finance data must always be fresh).
-const CACHE = 'jssf-v2';
+const CACHE = 'jssf-v3';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -35,8 +35,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first for static assets (icons, _next static files).
-  if (url.pathname.startsWith('/_next/static/') || url.pathname.startsWith('/icons/')) {
+  // Cache immutable framework assets only. Branding comes from the settings API.
+  if (url.pathname.startsWith('/_next/static/')) {
     event.respondWith(
       caches.match(request).then(
         (cached) =>

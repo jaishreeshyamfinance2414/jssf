@@ -22,28 +22,31 @@ export const settingsController = {
     const kind = req.params.kind;
     if (kind !== 'logo' && kind !== 'favicon') throw BadRequest('Unknown branding asset');
     const asset = await settingsRepository.getBrandingAsset(kind);
-    if (!asset) return res.redirect(302, kind === 'logo' ? '/logo.png' : '/icon.png');
+    if (!asset) {
+      if (kind === 'logo') return res.status(404).end();
+      // A generated text placeholder keeps the browser tab free of bundled branding.
+      const placeholder = '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><rect width="128" height="128" rx="20" fill="#f5f4ef"/><text x="64" y="69" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="bold" fill="#17251e">Upcoming</text></svg>';
+      res.setHeader('Content-Type', 'image/svg+xml');
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return res.send(placeholder);
+    }
     res.setHeader('Content-Type', asset.content_type);
     res.setHeader('Content-Length', asset.bytes.length);
-    res.setHeader('Cache-Control', 'public, max-age=60');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     return res.end(asset.bytes);
   },
 
   async getBrandingManifest(_req: Request, res: Response) {
     const branding = await settingsRepository.branding();
-    const icon = branding.faviconVersion
-      ? `/api/v1/settings/branding/assets/favicon?v=${encodeURIComponent(branding.faviconVersion)}`
-      : '/icons/icon-192.png';
+    const icon = `/api/v1/settings/branding/assets/favicon${branding.faviconVersion ? `?v=${encodeURIComponent(branding.faviconVersion)}` : ''}`;
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Type', 'application/manifest+json');
     return res.json({ name: branding.businessName, short_name: branding.businessName,
       description: 'Loan Management System', id: '/', start_url: '/', scope: '/', display: 'standalone',
       background_color: '#F5F4EF', theme_color: '#12805A',
-      icons: branding.faviconVersion
-        ? [{ src: icon, sizes: 'any', type: 'image/png', purpose: 'any' }]
-        : [{ src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' }] });
+      icons: [{ src: icon, sizes: 'any', type: branding.faviconVersion ? 'image/png' : 'image/svg+xml', purpose: 'any' }] });
   },
   async getAll(_req: Request, res: Response) {
     const settings = await settingsRepository.getAll();

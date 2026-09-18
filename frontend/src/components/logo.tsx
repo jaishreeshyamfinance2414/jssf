@@ -14,8 +14,10 @@ export function Logo({ className, size = 40 }: { className?: string; size?: numb
       )}
       style={{ width: size, height: size }}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={logoUrl} alt={businessName} width={size} height={size} className="h-full w-full object-contain" />
+      {logoUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={logoUrl} alt={businessName} width={size} height={size} className="h-full w-full object-contain" />
+      ) : <span className="px-0.5 text-center text-[8px] font-semibold leading-tight text-slate-600">Upcoming</span>}
     </span>
   );
 }

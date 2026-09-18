@@ -6,7 +6,7 @@ import { useBranding } from '@/lib/branding-context';
 // Registers the service worker and shows an "Add to Home Screen" banner
 // when the browser fires beforeinstallprompt (Chrome/Edge on Android & desktop).
 export function PwaInstall() {
-  const { businessName, faviconUrl } = useBranding();
+  const { businessName, faviconUrl, faviconVersion } = useBranding();
   const [deferredPrompt, setDeferredPrompt] = useState<Event | null>(null);
   const [dismissed, setDismissed] = useState(false);
 
@@ -41,7 +41,8 @@ export function PwaInstall() {
 
   return (
     <div className="fixed bottom-4 left-4 right-4 z-50 mx-auto flex max-w-md items-center gap-3 rounded-xl border border-border bg-card p-3 shadow-lg">
-      <img src={faviconUrl} alt="" className="h-10 w-10 rounded-lg" />
+      {faviconVersion ? <img src={faviconUrl!} alt="" className="h-10 w-10 rounded-lg" />
+        : <span className="flex h-10 w-10 items-center justify-center rounded-lg border text-[8px]">Upcoming</span>}
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-foreground">Install {businessName}</p>
         <p className="text-xs text-muted-foreground">Add to your home screen for quick access</p>
