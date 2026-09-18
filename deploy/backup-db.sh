@@ -8,12 +8,12 @@
 # Customer documents are stored in Cloudflare R2 by the application itself
 # and are NOT copied by this script. R2 is their primary (and only) store.
 #
-# Install the fixed root cron helper during deployment, then set the daily
-# schedule in Settings → Backup & Storage. The helper installs a root-owned
-# copy of this script at /usr/local/libexec/jssf/backup-db.sh.
+# The existing root crontab runs this script daily. Settings can show the
+# latest result or run the same script immediately; it does not edit crontab.
+# Example: 17 2 * * * /usr/bin/bash /home/ubuntu/jssf/deploy/backup-db.sh
 #
-# The managed root cron sets BACKUP_ENV_FILE=/etc/jssf/backup.env. An interactive
-# run may instead use ~/.config/jssf/backup.env (see backup.env.example).
+# Credentials load from ~/.config/jssf/backup.env unless BACKUP_ENV_FILE is set
+# explicitly (see backup.env.example).
 # If the file is absent or B2 variables are not set, the script still creates a
 # local backup and exits cleanly.
 #
@@ -21,6 +21,14 @@
 # rclone. That has been removed. An archived copy is kept as
 # deploy/backup-db-gdrive.sh — see BACKUP-LEGACY.md for details.
 set -euo pipefail
+
+# Both the root cron and Backup Now invoke this same script path. Lock the
+# script inode so two dumps cannot overlap or overwrite the same archive.
+exec 9< "$0"
+if ! flock -n 9; then
+  echo 'ERROR: A database backup is already running.' >&2
+  exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Load credentials from the protected environment file
@@ -39,7 +47,7 @@ fi
 BACKUP_DIR="$HOME/backups"
 LOCAL_KEEP_DAYS=7        # local .gz files older than this are deleted
 LOG_KEEP_DAYS=30         # local per-run logs older than this are deleted
-STAMP="$(date +%Y-%m-%d_%H%M)"
+STAMP="$(date +%Y-%m-%d_%H%M%S)"
 FILE="$BACKUP_DIR/jssf_$STAMP.sql.gz"
 RUN_LOG="$BACKUP_DIR/jssf_backup_$STAMP.log"
 

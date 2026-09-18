@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { settingsRepository } from './settings.repository';
-import { UpdatePenaltyBody, UpdateLoanNumberBody, UpdateBrandingBody, UpdateBackupCronBody } from './settings.schema';
+import { UpdatePenaltyBody, UpdateLoanNumberBody, UpdateBrandingBody } from './settings.schema';
 import { audit } from '../audit/audit.service';
 import { ok } from '../../shared/http';
 import { AppError, BadRequest, Conflict } from '../../shared/errors';
@@ -9,7 +9,7 @@ import { createDatabaseExport } from './database-export';
 import { restoreDatabase } from './database-restore';
 import { appendRestoreChunk, beginRestore, finishRestoreUpload, restoreUploadStatus, startRestoreUpload } from './restore-upload';
 import { logger } from '../../config/logger';
-import { backupCronStatus, setBackupCron } from './backup-cron.service';
+import { backupHistory, startBackupNow, isBackupNowRunning } from './backup-history.service';
 
 let backupOperationInProgress = false;
 
@@ -54,17 +54,17 @@ export const settingsController = {
     return ok(res, settings);
   },
 
-  async getBackupCron(_req: Request, res: Response) {
-    return ok(res, await backupCronStatus());
+  async getBackupHistory(_req: Request, res: Response) {
+    return ok(res, await backupHistory());
   },
 
-  async updateBackupCron(req: Request, res: Response) {
-    const { enabled, time } = req.body as UpdateBackupCronBody;
-    const old = await backupCronStatus();
-    const next = await setBackupCron(enabled, time);
-    await audit({ actorId: req.user!.sub, action: 'SETTING_UPDATED', entity: 'setting',
-      entityId: 'backup_cron', meta: { old, new: next }, ip: req.ip });
-    return ok(res, next);
+  async backupNow(req: Request, res: Response) {
+    if (backupOperationInProgress || isBackupNowRunning()) throw Conflict('A backup operation is already in progress.');
+    const started = await startBackupNow();
+    void audit({ actorId: req.user!.sub, action: 'DATABASE_BACKUP_REQUESTED', entity: 'database',
+      entityId: 'jssf', meta: { mode: 'server', startedAt: started.startedAt }, ip: req.ip })
+      .catch(error => logger.error({ err: error }, 'Could not audit Backup Now request'));
+    return ok(res, started, 202);
   },
 
   async updatePenalty(req: Request, res: Response) {
@@ -131,7 +131,7 @@ export const settingsController = {
   },
 
   async downloadBackup(req: Request, res: Response) {
-    if (backupOperationInProgress) throw Conflict('A backup operation is already in progress. Try again shortly.');
+    if (backupOperationInProgress || isBackupNowRunning()) throw Conflict('A backup operation is already in progress. Try again shortly.');
     backupOperationInProgress = true;
     let archive: Awaited<ReturnType<typeof createDatabaseExport>> | undefined;
     try {
@@ -156,7 +156,7 @@ export const settingsController = {
   },
 
   async startRestoreUpload(req: Request, res: Response) {
-    if (backupOperationInProgress) throw Conflict('A backup operation is already in progress. Try again shortly.');
+    if (backupOperationInProgress || isBackupNowRunning()) throw Conflict('A backup operation is already in progress. Try again shortly.');
     const { filename, size } = req.body as { filename?: string; size?: number };
     if (!filename || typeof size !== 'number') throw BadRequest('Backup filename and size are required.');
     return ok(res, await startRestoreUpload(req.user!.sub, filename, size));
@@ -168,7 +168,7 @@ export const settingsController = {
   },
 
   async restoreBackup(req: Request, res: Response) {
-    if (backupOperationInProgress) throw Conflict('A backup operation is already in progress. Try again shortly.');
+    if (backupOperationInProgress || isBackupNowRunning()) throw Conflict('A backup operation is already in progress. Try again shortly.');
     const owner = req.user!.sub;
     const id = req.params.id;
     const upload = beginRestore(id, owner);

@@ -110,7 +110,6 @@ npm run build
 
 echo "==> [7/8] Start app under pm2"
 cd "$APP_DIR"
-bash deploy/install-backup-cron-helper.sh
 pm2 start deploy/ecosystem.config.js
 pm2 save
 # auto-start pm2 on reboot

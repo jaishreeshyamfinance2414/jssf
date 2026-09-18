@@ -105,11 +105,26 @@ When it finishes: **https://yourdomain.com** is live (through Cloudflare).
 
 1. Log in as `admin@jssf.local` / `Admin@123` and **change the password**.
 2. Change/disable the seeded agent accounts (`Agent@123`) too.
-3. Open **Settings → Backup & Storage → Scheduled Database Backup**, choose a daily time, and enable the job. Setup installs a root-owned backup script and a restricted cron helper. On an existing server, deploy once to install the helper; if needed, run `bash /home/ubuntu/jssf/deploy/install-backup-cron-helper.sh` as the PM2 owner. Saving in Settings migrates the older manual root crontab entry to the managed entry.
+3. Keep the nightly backup in the server's root crontab:
+   ```bash
+   HOME=/home/ubuntu
+   PATH=/usr/local/bin:/usr/bin:/bin
+   17 2 * * * /usr/bin/bash /home/ubuntu/jssf/deploy/backup-db.sh >> /home/ubuntu/backups/backup.log 2>&1
+   ```
 
-   The installer copies any existing `/home/ubuntu/.config/jssf/backup.env` to root-owned `/etc/jssf/backup.env`. Re-run the installer after changing B2 credentials. Managed backups and logs are written under `/root/backups` and `/var/log/jssf-backup.log`.
+   Settings → Backup & Storage displays the latest readable backup log and offers **Backup Now**. It does not change the server's cron schedule. Backup Now executes the same script as the root cron entry and records its result in the backup logs.
 
-   Settings also shows the last backup result, completion time, and recorded error. The managed job writes this status to `/var/lib/jssf/backup-status.tsv`; before its first run, Settings reads the newest existing per-run backup log. Use **Refresh status** to fetch the latest result.
+   If this server previously installed the retired Settings cron manager, first verify that root's crontab still points to `/home/ubuntu/jssf/deploy/backup-db.sh`. The obsolete installed helper, sudoers rule, and copied script can then be removed; they are not used by Backup Now. Keep the existing backup logs.
+   ```bash
+   sudo crontab -l
+   sudo rm -f /usr/local/sbin/jssf-backup-cron \
+     /usr/local/libexec/jssf/backup-db.sh \
+     /usr/local/libexec/jssf/run-backup.sh \
+     /etc/sudoers.d/jssf-backup-cron \
+     /etc/jssf/backup-cron.conf \
+     /etc/jssf/backup.env \
+     /var/lib/jssf/backup-status.tsv
+   ```
 
 ### Backblaze B2 backup destination (recommended)
 

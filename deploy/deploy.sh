@@ -27,6 +27,13 @@ fi
 rsync -a --exclude 'backend/.env' --exclude 'backend/uploads' \
       --exclude 'node_modules' --exclude '.next' --exclude 'dist' \
       "$SRC/" "$APP_DIR/"
+# rsync intentionally preserves server-only files. Remove the retired cron
+# editor sources explicitly so they cannot remain in a deployment.
+rm -f "$APP_DIR/backend/src/modules/settings/backup-cron.service.ts" \
+      "$APP_DIR/frontend/src/app/(app)/settings/backup-cron-section.tsx" \
+      "$APP_DIR/deploy/manage-backup-cron.sh" \
+      "$APP_DIR/deploy/install-backup-cron-helper.sh" \
+      "$APP_DIR/deploy/run-managed-backup.sh"
 rm -rf "$TMP"
 
 echo "==> Backend: install, build, migrate"
@@ -42,7 +49,6 @@ npm run build
 
 echo "==> Restarting"
 cd "$APP_DIR"
-bash deploy/install-backup-cron-helper.sh
 pm2 restart jssf-api jssf-web
 pm2 save
 echo "==> Done. Check: pm2 status && pm2 logs --lines 50"

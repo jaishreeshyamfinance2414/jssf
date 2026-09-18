@@ -6,7 +6,7 @@ import { api, apiGet } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { BackupCronSection } from './backup-cron-section';
+import { BackupHistorySection } from './backup-history-section';
 
 type Provider = 'b2' | 'r2';
 type Status = { connected: boolean; checkedAt: string; message: string };
@@ -144,8 +144,8 @@ export function BackupSection() {
             );
           })}
         </div>
-        <p className="text-xs text-muted-foreground">Connection checks confirm bucket access. Scheduled B2 backups run from the server cron job below.</p>
-        <BackupCronSection />
+        <p className="text-xs text-muted-foreground">Connection checks confirm bucket access. Scheduled B2 backups follow the server&apos;s existing cron entry.</p>
+        <BackupHistorySection />
         <div className="rounded-md border p-4 space-y-3">
           <div>
             <h3 className="text-sm font-semibold text-foreground">Download a new database backup</h3>
