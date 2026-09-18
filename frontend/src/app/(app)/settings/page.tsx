@@ -55,8 +55,6 @@ export default function SettingsPage() {
   // ── Derived values ──
   const penaltySetting = settings.find(s => s.key === 'penalty');
   const currentPct = penaltySetting ? Number((penaltySetting.value as { per_day_pct: number }).per_day_pct) : null;
-  const interestSetting = settings.find(s => s.key === 'default_interest_rate');
-  const currentInterest = interestSetting ? Number((interestSetting.value as { pct: number }).pct) : 10;
 
   const startEdit = () => {
     setPenaltyDraft(currentPct != null ? String(currentPct) : '0.2');
@@ -107,7 +105,7 @@ export default function SettingsPage() {
   const penaltyDisplay = currentPct != null ? `${currentPct}%` : '0.2%';
 
   return (
-    <PageShell title="Settings" description="Business rules for penalty, interest, and loan number format.">
+    <PageShell title="Settings" description="Business rules for penalty and loan number format.">
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><Settings className="h-4 w-4" /> Business Rules</CardTitle></CardHeader>
         <CardContent className="grid gap-3 text-sm text-muted-foreground md:grid-cols-2">
@@ -156,7 +154,6 @@ export default function SettingsPage() {
               <p className={`text-xs mt-1 ${saveMsg.type === 'err' ? 'text-danger' : 'text-success'}`}>{saveMsg.text}</p>
             )}
           </div>
-          <div className="rounded-md border p-3">Default flat interest: {loadingSettings ? '…' : `${currentInterest}%`}</div>
           <div className="rounded-md border p-3">Loan format: JSSF-year-sequence</div>
         </CardContent>
       </Card>

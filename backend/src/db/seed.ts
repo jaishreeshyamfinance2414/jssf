@@ -93,7 +93,6 @@ const COLLECTION_AGENTS = [
 const SETTINGS: Array<[string, unknown, string]> = [
   ['penalty', { per_day_pct: 0.2 }, 'Penalty % of loan principal per missed day'],
   ['loan_number', { prefix: 'JSSF', pad: 7 }, 'Loan number format'],
-  ['default_interest_rate', { pct: 10 }, 'Default flat interest %'],
 ];
 
 async function seed() {
