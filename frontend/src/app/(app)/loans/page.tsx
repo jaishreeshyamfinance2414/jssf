@@ -7,6 +7,7 @@ import { ArrowUpDown, CheckCircle2, Edit2, History, Pencil, Plus, Search, Trash2
 import { apiDelete, apiGet, apiPost, apiPut } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { date, dateTime, money } from '@/lib/format';
+import { loanTypeLabel } from '@/lib/loan-type';
 import { DataTable } from '@/components/app/data-table';
 import { PageShell } from '@/components/app/page-shell';
 import { Pagination } from '@/components/app/pagination';
@@ -274,7 +275,7 @@ export default function LoansPage() {
     setEdit(loan);
     setEditForm({
       principal: String(loan.principal),
-      emiFrequency: loan.emi_frequency,
+      emiFrequency: ['daily', 'meter'].includes(loan.emi_frequency) ? loan.emi_frequency : '',
       tenureCount: String(loan.tenure_count),
       emiAmount: String(loan.emi_amount),
       loanDate: String(loan.loan_date).slice(0, 10),
@@ -309,7 +310,7 @@ export default function LoansPage() {
     setPage(1);
   }, [q, sort]);
   return (
-    <PageShell title="Loans" description="Create daily, weekly, or monthly loan applications for admin approval." action={<Button onClick={() => setShow((v) => !v)}><Plus className="h-4 w-4" /> Create Loan</Button>}>
+    <PageShell title="Loans" description="Create Daily EMI or Meter Loan applications for admin approval." action={<Button onClick={() => setShow((v) => !v)}><Plus className="h-4 w-4" /> Create Loan</Button>}>
       {error && <div className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
       {info && <div className="rounded-md bg-primary/10 px-3 py-2 text-sm text-primary">{info}</div>}
       {show && (
@@ -359,10 +360,10 @@ export default function LoansPage() {
               </div>
               <Input type="number" placeholder="Loan amount" value={form.principal} onChange={(e) => setForm({ ...form, principal: e.target.value })} required />
               <select className="h-10 rounded-md border bg-background px-3 text-sm" value={form.emiFrequency} onChange={(e) => setForm({ ...form, emiFrequency: e.target.value })}>
-                <option value="daily">Daily EMI</option><option value="weekly">Weekly EMI</option><option value="monthly">Monthly EMI</option>
+                <option value="daily">Daily EMI</option><option value="meter">Meter Loan</option>
               </select>
-              <Input type="number" placeholder={form.emiFrequency === 'daily' ? 'Total days / EMIs' : 'Total EMIs'} value={form.tenureCount} onChange={(e) => setForm({ ...form, tenureCount: e.target.value })} required />
-              <Input type="number" placeholder={form.emiFrequency === 'daily' ? 'Per day EMI amount' : 'Per EMI amount'} value={form.emiAmount} onChange={(e) => setForm({ ...form, emiAmount: e.target.value })} required />
+              <Input type="number" placeholder="Total days / EMIs" value={form.tenureCount} onChange={(e) => setForm({ ...form, tenureCount: e.target.value })} required />
+              <Input type="number" placeholder="Per day EMI amount" value={form.emiAmount} onChange={(e) => setForm({ ...form, emiAmount: e.target.value })} required />
               <div>
                 <label className="mb-1 block text-xs text-muted-foreground">Loan Date</label>
                 <Input
@@ -401,11 +402,13 @@ export default function LoansPage() {
           <CardContent>
             <form className="grid gap-3 lg:grid-cols-5" onSubmit={(e) => { e.preventDefault(); update.mutate(); }}>
               <Input type="number" placeholder="Loan amount" value={editForm.principal} onChange={(e) => setEditForm({ ...editForm, principal: e.target.value })} required />
-              <select className="h-10 rounded-md border bg-background px-3 text-sm" value={editForm.emiFrequency} onChange={(e) => setEditForm({ ...editForm, emiFrequency: e.target.value })}>
-                <option value="daily">Daily EMI</option><option value="weekly">Weekly EMI</option><option value="monthly">Monthly EMI</option>
+              <select className="h-10 rounded-md border bg-background px-3 text-sm" value={editForm.emiFrequency} onChange={(e) => setEditForm({ ...editForm, emiFrequency: e.target.value })} required>
+                {editForm.emiFrequency === '' && <option value="" disabled>Select loan type</option>}
+                <option value="daily">Daily EMI</option><option value="meter">Meter Loan</option>
               </select>
-              <Input type="number" placeholder={editForm.emiFrequency === 'daily' ? 'Total days / EMIs' : 'Total EMIs'} value={editForm.tenureCount} onChange={(e) => setEditForm({ ...editForm, tenureCount: e.target.value })} required />
-              <Input type="number" placeholder={editForm.emiFrequency === 'daily' ? 'Per day EMI amount' : 'Per EMI amount'} value={editForm.emiAmount} onChange={(e) => setEditForm({ ...editForm, emiAmount: e.target.value })} required />
+              {editForm.emiFrequency === '' && <p className="text-xs text-muted-foreground lg:col-span-5">This existing loan uses {loanTypeLabel(edit.emi_frequency)}. Select a new type to change its installment schedule.</p>}
+              <Input type="number" placeholder="Total days / EMIs" value={editForm.tenureCount} onChange={(e) => setEditForm({ ...editForm, tenureCount: e.target.value })} required />
+              <Input type="number" placeholder="Per day EMI amount" value={editForm.emiAmount} onChange={(e) => setEditForm({ ...editForm, emiAmount: e.target.value })} required />
               <div>
                 <label className="mb-1 block text-xs text-muted-foreground">Loan Date</label>
                 <Input type="date" value={editForm.loanDate} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setEditForm({ ...editForm, loanDate: e.target.value })} disabled={user?.role !== 'admin'} required />
@@ -485,7 +488,7 @@ export default function LoansPage() {
             <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
               <span>Customer: <span className="font-medium text-foreground">{historyLoan.customer_name}</span></span>
               <span>Loan Amount: <span className="font-medium text-foreground">{money(historyLoan.principal)}</span></span>
-              <span>EMI: <span className="font-medium text-foreground">{money(historyLoan.emi_amount)} ({historyLoan.emi_frequency} x {historyLoan.tenure_count})</span></span>
+              <span>EMI: <span className="font-medium text-foreground">{money(historyLoan.emi_amount)} ({loanTypeLabel(historyLoan.emi_frequency)} x {historyLoan.tenure_count})</span></span>
               <span>Loan Date: <span className="font-medium text-foreground">{date(historyLoan.loan_date)}</span></span>
             </div>
           </CardHeader>
@@ -663,7 +666,7 @@ export default function LoansPage() {
           l.customer_name,
           money(l.principal),
           money(l.emi_amount),
-          `${l.emi_frequency} x ${l.tenure_count}`,
+          `${loanTypeLabel(l.emi_frequency)} x ${l.tenure_count}`,
           <StatusPill key={l.id} value={l.status} />,
           date(l.loan_date),
           l.status === 'closed'

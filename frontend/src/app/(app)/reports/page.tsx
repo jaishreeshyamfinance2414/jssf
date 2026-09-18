@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { BarChart3, Download, TrendingUp, CalendarDays, AlertTriangle, User, Users, Landmark, FileText } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { date, dateTime, money } from '@/lib/format';
+import { loanTypeLabel } from '@/lib/loan-type';
 import { PageShell } from '@/components/app/page-shell';
 import { DataTable } from '@/components/app/data-table';
 import { StatusPill } from '@/components/app/status-pill';
@@ -295,7 +296,7 @@ export default function ReportsPage() {
               date(l.loan_date),
               money(l.principal),
               money(l.total_payable),
-              <span key={l.id}>{money(l.emi_amount)} <span className="text-xs text-muted-foreground">× {l.tenure_count} {l.emi_frequency}</span></span>,
+              <span key={l.id}>{money(l.emi_amount)} <span className="text-xs text-muted-foreground">× {l.tenure_count} {loanTypeLabel(l.emi_frequency)}</span></span>,
               money(l.paid),
               money(l.remaining),
               <StatusPill key={`${l.id}-s`} value={l.status} />,

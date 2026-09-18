@@ -3,7 +3,8 @@ import { query } from '../../db/pool';
 import { historyCtes } from '../collections/statement-history';
 import { loanBalanceJoin } from './loan-balance';
 
-export type EmiFrequency = 'daily' | 'weekly' | 'monthly';
+export type EmiFrequency = 'daily' | 'meter';
+type StoredEmiFrequency = EmiFrequency | 'weekly' | 'monthly';
 export type LoanStatus = 'pending' | 'approved' | 'rejected' | 'active' | 'closed';
 
 export interface CreateLoanInput {
@@ -35,8 +36,9 @@ export interface UpdateLoanTermsInput {
   loanDate: string;
 }
 
-const FREQUENCY_UNIT: Record<EmiFrequency, string> = {
+const FREQUENCY_UNIT: Record<StoredEmiFrequency, string> = {
   daily: 'days',
+  meter: 'days',
   weekly: 'weeks',
   monthly: 'months',
 };
@@ -216,7 +218,7 @@ export const loanRepository = {
   async rescheduleOpenEmis(
     loanId: string,
     loanDate: string,
-    frequency: EmiFrequency,
+    frequency: StoredEmiFrequency,
     tenureCount: number,
     emiAmount: number,
     totalPayable: number,
@@ -354,7 +356,7 @@ export const loanRepository = {
   async generateSchedule(
     loanId: string,
     loanDate: string,
-    frequency: EmiFrequency,
+    frequency: StoredEmiFrequency,
     tenureCount: number,
     totalPayable: number,
     client: PoolClient,

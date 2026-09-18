@@ -6,6 +6,7 @@ import { CheckSquare, X, Undo2 } from 'lucide-react';
 import { useState } from 'react';
 import { apiGet, apiPost } from '@/lib/api';
 import { money } from '@/lib/format';
+import { loanTypeLabel } from '@/lib/loan-type';
 import { PageShell } from '@/components/app/page-shell';
 import { DataTable } from '@/components/app/data-table';
 import { StatusPill } from '@/components/app/status-pill';
@@ -53,7 +54,7 @@ export default function ApprovalsPage() {
           l.loan_number,
           l.customer_name,
           money(l.principal),
-          `${l.emi_frequency} x ${l.tenure_count}`,
+          `${loanTypeLabel(l.emi_frequency)} x ${l.tenure_count}`,
           <StatusPill key={`${l.id}-s`} value={l.status} />,
           <div key={l.id} className="flex gap-2"><Button size="sm" onClick={() => act.mutate({ id: l.id, action: 'approve' })}><CheckSquare className="h-4 w-4" /> Approve</Button><Button size="sm" variant="danger" onClick={() => act.mutate({ id: l.id, action: 'reject' })}><X className="h-4 w-4" /> Reject</Button></div>,
         ])}

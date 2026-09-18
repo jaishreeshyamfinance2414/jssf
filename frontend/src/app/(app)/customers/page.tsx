@@ -9,6 +9,7 @@ import { api, apiDelete, apiGet, fetchFileUrl } from '@/lib/api';
 import { compressFormImages, compressImageFile } from '@/lib/compress-image';
 import { useAuth } from '@/lib/auth-context';
 import { date, dateTime, money } from '@/lib/format';
+import { loanTypeLabel } from '@/lib/loan-type';
 import { PageShell } from '@/components/app/page-shell';
 import { Pagination } from '@/components/app/pagination';
 import { DataTable } from '@/components/app/data-table';
@@ -601,7 +602,7 @@ export default function CustomersPage() {
               rows={selected.loans.map((l) => [
                 <span key={`${l.id}-number`} className="font-semibold">{l.loan_number}</span>,
                 money(l.principal),
-                `${l.emi_frequency} x ${l.tenure_count}`,
+                `${loanTypeLabel(l.emi_frequency)} x ${l.tenure_count}`,
                 <CustomerLoanStatus key={`${l.id}-status`} status={l.status} />,
                 date(l.loan_date),
                 <div key={`${l.id}-statement`}>

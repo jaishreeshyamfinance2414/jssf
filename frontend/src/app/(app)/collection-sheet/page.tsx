@@ -7,6 +7,7 @@ import { ArrowUpDown, CheckCircle2, Clock, Download, History, MapPin, Phone, Use
 import { downloadCollectionPdf } from '@/lib/collection-pdf';
 import { apiGet } from '@/lib/api';
 import { date, money } from '@/lib/format';
+import { loanTypeLabel } from '@/lib/loan-type';
 import { PageShell } from '@/components/app/page-shell';
 
 interface SheetRow {
@@ -252,7 +253,7 @@ export default function CollectionSheetPage() {
                       </td>
                       <td className="px-4 py-3 align-top"><DoneBadge row={r} /></td>
                       <td className="whitespace-nowrap px-4 py-3 align-top">
-                        {money(r.emi_amount)} <span className="text-xs text-muted-foreground">({r.emi_frequency})</span>
+                        {money(r.emi_amount)} <span className="text-xs text-muted-foreground">({loanTypeLabel(r.emi_frequency)})</span>
                       </td>
                       <td className="px-4 py-3 align-top">
                         {r.missed_count > 0 ? <span className="font-medium text-danger">{r.missed_count}</span>

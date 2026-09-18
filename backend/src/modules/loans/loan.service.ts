@@ -11,10 +11,10 @@ import { CreateLoanBody } from './loan.schema';
 import { UpdateLoanBody, CloseLoanBody } from './loan.schema';
 import { loanRepository } from './loan.repository';
 
-const durationFor = (frequency: CreateLoanBody['emiFrequency'], tenure: number) => {
-  if (frequency === 'daily') return tenure;
+const durationFor = (frequency: string, tenure: number) => {
   if (frequency === 'weekly') return tenure * 7;
-  return tenure * 30;
+  if (frequency === 'monthly') return tenure * 30;
+  return tenure;
 };
 
 export const loanService = {

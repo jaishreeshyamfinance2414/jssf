@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const createLoanSchema = z.object({
   customerId: z.string().uuid(),
   principal: z.coerce.number().positive(),
-  emiFrequency: z.enum(['daily', 'weekly', 'monthly']).default('daily'),
+  emiFrequency: z.enum(['daily', 'meter']).default('daily'),
   tenureCount: z.coerce.number().int().positive().default(100),
   emiAmount: z.coerce.number().positive(),
   loanDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
@@ -12,7 +12,7 @@ export const createLoanSchema = z.object({
 
 export const updateLoanSchema = z.object({
   principal: z.coerce.number().positive().optional(),
-  emiFrequency: z.enum(['daily', 'weekly', 'monthly']).optional(),
+  emiFrequency: z.enum(['daily', 'meter']).optional(),
   tenureCount: z.coerce.number().int().positive().optional(),
   emiAmount: z.coerce.number().positive().optional(),
   loanDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
