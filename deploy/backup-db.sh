@@ -3,7 +3,7 @@
 #
 # Backup destinations:
 #   - Local disk   ~/backups/           (7-day retention)
-#   - Backblaze B2 database/ + logs/    (daily / weekly / monthly tiers)
+#   - Backblaze B2 database/           (daily / weekly / monthly tiers)
 #
 # Customer documents are stored in Cloudflare R2 by the application itself
 # and are NOT copied by this script. R2 is their primary (and only) store.
@@ -24,13 +24,31 @@
 # deploy/backup-db-gdrive.sh — see BACKUP-LEGACY.md for details.
 set -euo pipefail
 
+RUN_SOURCE=scheduled
+if [[ "${BACKUP_SOURCE:-}" == manual ]]; then RUN_SOURCE=manual; fi
+RUN_ID="$(date +%Y%m%dT%H%M%S)-$BASHPID"
+echo "$(date -Is) BACKUP_RUN_STARTED id=$RUN_ID source=$RUN_SOURCE"
+
 # Both the root cron and Backup Now invoke this same script path. Lock the
 # script inode so two dumps cannot overlap or overwrite the same archive.
 exec 9< "$0"
 if ! flock -n 9; then
-  echo 'ERROR: A database backup is already running.' >&2
+  echo "$(date -Is) ERROR: A database backup is already running."
+  echo "$(date -Is) BACKUP_RUN_FAILED id=$RUN_ID source=$RUN_SOURCE exit=1"
   exit 1
 fi
+
+log() {
+  echo "$(date -Is) $*"
+}
+
+log_exit_status() {
+  local status=$?
+  if [[ "$status" -ne 0 ]]; then
+    log "BACKUP_RUN_FAILED id=$RUN_ID source=$RUN_SOURCE exit=$status"
+  fi
+}
+trap log_exit_status EXIT
 
 # ---------------------------------------------------------------------------
 # Load credentials from the protected environment file
@@ -50,32 +68,11 @@ BACKUP_DIR="$HOME/backups"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$SCRIPT_DIR/../backend"
 LOCAL_KEEP_DAYS=7        # local .gz files older than this are deleted
-LOG_KEEP_DAYS=30         # local per-run logs older than this are deleted
 STAMP="$(date +%Y-%m-%d_%H%M%S)"
 FILE="$BACKUP_DIR/jssf_$STAMP.sql.gz"
-RUN_LOG="$BACKUP_DIR/jssf_backup_$STAMP.log"
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-log() {
-  local message
-  message="$(date -Is) $*"
-  echo "$message"
-  echo "$message" >> "$RUN_LOG"
-}
-
-log_exit_status() {
-  local status=$?
-  if [[ "$status" -ne 0 && "${FAILURE_LOGGED:-0}" -eq 0 ]]; then
-    log "ERROR: backup failed with exit status $status"
-  fi
-}
-trap log_exit_status EXIT
 
 mkdir -p "$BACKUP_DIR"
 BACKUP_FAILED=0
-FAILURE_LOGGED=0
 
 # ---------------------------------------------------------------------------
 # 1. Dump the database configured for the application and validate the archive
@@ -165,10 +162,6 @@ if [[ -n "${B2_BUCKET:-}" || -n "${B2_KEY_ID:-}" || -n "${B2_APPLICATION_KEY:-}"
     log "B2 database backup completed successfully"
   fi
 
-  # Upload this run's log to B2 for remote auditing
-  if ! b2_upload_and_verify "$RUN_LOG" "logs/jssf_backup_$STAMP.log"; then
-    BACKUP_FAILED=1
-  fi
 else
   log "Backblaze B2 skipped (credentials not configured in $BACKUP_ENV_FILE)"
 fi
@@ -177,11 +170,10 @@ fi
 # 3. Prune old local files
 # ---------------------------------------------------------------------------
 find "$BACKUP_DIR" -name '*.gz' -mtime +"$LOCAL_KEEP_DAYS" -delete
-find "$BACKUP_DIR" -name 'jssf_backup_*.log' -mtime +"$LOG_KEEP_DAYS" -delete
 
 if [[ "$BACKUP_FAILED" -ne 0 ]]; then
-  FAILURE_LOGGED=1
   log "ERROR: backup completed with one or more failures"
   exit 1
 fi
 log "backup completed successfully"
+log "BACKUP_RUN_SUCCESS id=$RUN_ID source=$RUN_SOURCE"

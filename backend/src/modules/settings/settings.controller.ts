@@ -55,6 +55,7 @@ export const settingsController = {
   },
 
   async getBackupHistory(_req: Request, res: Response) {
+    res.setHeader('Cache-Control', 'no-store');
     return ok(res, await backupHistory());
   },
 
