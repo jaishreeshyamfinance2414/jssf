@@ -22,7 +22,7 @@ const ssl =
 
 export const pool = new Pool(
   env.DATABASE_URL
-    ? { connectionString: env.DATABASE_URL, max: env.PG_POOL_MAX, ssl }
+    ? { connectionString: env.DATABASE_URL, max: env.PG_POOL_MAX, ssl, options: '-c timezone=Asia/Kolkata' }
     : {
         host: env.PGHOST,
         port: env.PGPORT,
@@ -31,6 +31,7 @@ export const pool = new Pool(
         database: env.PGDATABASE,
         max: env.PG_POOL_MAX,
         ssl,
+        options: '-c timezone=Asia/Kolkata',
       },
 );
 

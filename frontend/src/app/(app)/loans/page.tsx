@@ -62,6 +62,7 @@ interface LoanDetail {
     agent_name: string | null;
     agent_ledger_id: string | null;
     note: string | null;
+    statement_no: number;
     installment_no: number | null;
     due_date: string | null;
     due_amount: string | null;
@@ -612,7 +613,7 @@ export default function LoansPage() {
                     const canModifyCoverageMarker = !isCoverageMarker || user?.role === 'admin';
                     return [
                       dateTime(c.collected_at),
-                      c.installment_no ?? '-',
+                      c.statement_no,
                       c.due_date ? date(c.due_date) : '-',
                       money(c.amount),
                       // Arrears can incur a penalty even on a payment day.

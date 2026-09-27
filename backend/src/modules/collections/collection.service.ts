@@ -16,9 +16,23 @@ export const collectionService = {
       const loan = await loanRepository.lockForUpdate(input.loanId, client);
       if (!loan) throw BadRequest('Loan not found');
       if (loan.status !== 'active') throw BadRequest('Collections can be recorded only for active loans');
-      if (input.collectedDate && actorRole !== 'admin') {
-        throw BadRequest('Only an admin can select a collection entry date');
+      if (input.collectedAt && actorRole !== 'admin') {
+        throw BadRequest('Only an admin can select a collection entry date and time');
       }
+      if (input.collectedAt && Date.parse(input.collectedAt) > Date.now()) {
+        throw BadRequest('Collection entry date and time cannot be in the future');
+      }
+
+      // A collection timestamp is an exact instant, while the one-entry rule
+      // and account ledger operate on the Indian business date containing it.
+      const { rows: businessDates } = await client.query<{ day: string }>(
+        `SELECT COALESCE(
+           ($1::timestamptz AT TIME ZONE 'Asia/Kolkata')::date,
+           (now() AT TIME ZONE 'Asia/Kolkata')::date
+         )::text AS day`,
+        [input.collectedAt ?? null],
+      );
+      const collectionDate = businessDates[0].day;
 
       // Area routing: a collection agent may only record entries for loans of
       // customers inside their assigned area(s). Admin/manager are exempt.
@@ -65,12 +79,12 @@ export const collectionService = {
       const { rows: entriesOnDate } = await client.query<{ type: string }>(
         `SELECT type FROM collections
           WHERE loan_id = $1
-            AND collected_at::date = COALESCE($2::date, CURRENT_DATE)
+            AND (collected_at AT TIME ZONE 'Asia/Kolkata')::date = $2::date
           LIMIT 1`,
-        [input.loanId, input.collectedDate ?? null],
+        [input.loanId, collectionDate],
       );
       if (entriesOnDate[0]) {
-        if (input.collectedDate) {
+        if (input.collectedAt) {
           throw BadRequest('This loan already has an entry available on the selected date.');
         }
         throw BadRequest(
@@ -100,7 +114,7 @@ export const collectionService = {
               loanId: input.loanId,
               type: 'missed',
               emiId: input.emiId,
-              collectedDate: input.collectedDate ?? null,
+              collectedAt: input.collectedAt ?? null,
             },
             ip,
           },
@@ -160,7 +174,7 @@ export const collectionService = {
           referenceId: collection.id,
           description: `Collection for ${loan.loan_number}`,
           createdBy: actorId,
-          txnDate: input.collectedDate ?? null,
+          txnDate: input.collectedAt ? collectionDate : null,
         });
       }
 
@@ -176,7 +190,7 @@ export const collectionService = {
             penalty: input.penalty,
             mode: input.mode,
             type,
-            collectedDate: input.collectedDate ?? null,
+            collectedAt: input.collectedAt ?? null,
           },
           ip,
         },

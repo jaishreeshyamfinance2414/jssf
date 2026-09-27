@@ -162,7 +162,7 @@ export const collectionRepository = {
        VALUES (
          $1,$2,$3,$4,$5,$6,$7,$8,$9,
          CASE WHEN $10 THEN now() ELSE NULL END,
-         CASE WHEN $11::date IS NULL THEN now() ELSE ($11::date + LOCALTIME)::timestamptz END
+         COALESCE($11::timestamptz, now())
        )
        RETURNING id`,
       [
@@ -176,7 +176,7 @@ export const collectionRepository = {
         input.note ?? null,
         input.createdBy,
         input.reconciledImmediately ?? false,
-        input.collectedDate ?? null,
+        input.collectedAt ?? null,
       ],
     );
     return rows[0];

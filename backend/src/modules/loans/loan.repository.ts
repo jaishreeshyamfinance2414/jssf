@@ -398,6 +398,7 @@ export const loanRepository = {
     const { rows } = await query(
       `WITH ${historyCtes(true, true)}
        SELECT co.*, co.collected_at::date::text AS entry_date,
+              (row_number() OVER (ORDER BY co.collected_at ASC, co.id ASC))::int AS statement_no,
               r.due_by_day AS expected_by_day, r.received_by_day AS received_by_day,
               CASE WHEN r.received_by_day > r.due_by_day THEN 'advance'
                    WHEN co.amount + co.penalty = 0 AND r.received_by_day < r.due_by_day THEN 'missed'
@@ -415,7 +416,7 @@ export const loanRepository = {
          LEFT JOIN users agent ON agent.id = co.agent_id
          LEFT JOIN users creator ON creator.id = co.created_by
          LEFT JOIN emi_schedule e ON e.id = co.emi_id
-        WHERE co.loan_id = $1 ORDER BY co.collected_at DESC`,
+        WHERE co.loan_id = $1 ORDER BY co.collected_at ASC, co.id ASC`,
       [loanId],
     );
     return rows;
