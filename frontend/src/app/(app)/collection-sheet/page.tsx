@@ -117,6 +117,8 @@ export default function CollectionSheetPage() {
   const [area, setArea] = useState('all');
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [pdfDate, setPdfDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
   const { data: rows = [] } = useQuery({
     queryKey: ['collection-sheet'],
     queryFn: () => apiGet<SheetRow[]>('/collections/sheet'),
@@ -199,15 +201,27 @@ export default function CollectionSheetPage() {
             />
             <div className="mt-4 flex gap-2">
               <button
-                onClick={() => {
-                  const d = new Date(pdfDate);
-                  const formatted = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
-                  downloadCollectionPdf(visible, formatted);
-                  setShowPdfModal(false);
+                onClick={async () => {
+                  setPdfBusy(true);
+                  setPdfError(null);
+                  try {
+                    // Fetch immediately before generation so a name changed in
+                    // Settings (including from another session) is never stale.
+                    const branding = await apiGet<{ businessName: string }>('/settings/branding');
+                    const [year, month, day] = pdfDate.split('-');
+                    const formatted = `${day}/${month}/${year}`;
+                    downloadCollectionPdf(visible, formatted, branding.businessName);
+                    setShowPdfModal(false);
+                  } catch {
+                    setPdfError('Unable to load the current business name. Please try again.');
+                  } finally {
+                    setPdfBusy(false);
+                  }
                 }}
-                className="flex-1 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                disabled={pdfBusy}
+                className="flex-1 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
-                Download
+                {pdfBusy ? 'Preparing…' : 'Download'}
               </button>
               <button
                 onClick={() => setShowPdfModal(false)}
@@ -216,6 +230,7 @@ export default function CollectionSheetPage() {
                 Cancel
               </button>
             </div>
+            {pdfError && <p className="mt-3 text-sm text-danger">{pdfError}</p>}
           </div>
         </div>
       )}

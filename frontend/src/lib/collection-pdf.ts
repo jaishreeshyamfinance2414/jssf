@@ -39,24 +39,40 @@ function formatNameWork(name: string, work: string | null | undefined): string {
   return `${name} (${work})`;
 }
 
-export function downloadCollectionPdf(rows: PdfRow[], dateStr: string) {
+export function downloadCollectionPdf(rows: PdfRow[], dateStr: string, businessName: string) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pw = 210;
   const mx = 5;
   const tableW = pw - mx * 2; // table width = page minus margins
 
   // ── Header: Yellow rounded box, black outline, red text ──
-  const boxH = 10;
+  const title = businessName.trim() || 'Jai Shree Shyam Finance';
+  doc.setFont('helvetica', 'bold');
+  let titleSize = 20;
+  doc.setFontSize(titleSize);
+  let titleLines = doc.splitTextToSize(title, tableW - 10) as string[];
+  while (titleLines.length > 2 && titleSize > 8) {
+    titleSize -= 1;
+    doc.setFontSize(titleSize);
+    titleLines = doc.splitTextToSize(title, tableW - 10) as string[];
+  }
+
+  const fontHeight = titleSize * 0.3528;
+  const titleLineHeight = fontHeight * 1.05;
+  const boxH = Math.max(10, fontHeight + (titleLines.length - 1) * titleLineHeight + 3);
   const boxY = 2;
   doc.setFillColor(255, 255, 0);
   doc.setDrawColor(0, 0, 0);
   doc.setLineWidth(0.6);
   doc.roundedRect(mx, boxY, tableW, boxH, 3, 3, 'FD');
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(20); // ~25pt Word equivalent
+  doc.setFontSize(titleSize);
   doc.setTextColor(255, 0, 0);
-  doc.text('JAI SHRI SHYAM FINANCE', pw / 2, boxY + boxH / 2, { align: 'center', baseline: 'middle' });
+  const firstTitleBaseline = boxY + (boxH - (fontHeight + (titleLines.length - 1) * titleLineHeight)) / 2 + fontHeight * 0.8;
+  doc.text(titleLines, pw / 2, firstTitleBaseline, {
+    align: 'center',
+    lineHeightFactor: 1.05,
+  });
 
   // Date
   doc.setFontSize(10);
