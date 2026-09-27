@@ -394,3 +394,124 @@ export async function downloadCompleteCustomerPdf(customer: CompleteCustomerData
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
+
+export async function downloadLoanStatementPdf(loanId: string, customerName: string): Promise<void> {
+  let detail: LoanDetail;
+  let businessName: string;
+  try {
+    const [branding, loanDetail] = await Promise.all([
+      apiGet<{ businessName: string }>('/settings/branding'),
+      apiGet<LoanDetail>(`/loans/${loanId}`),
+    ]);
+    businessName = branding.businessName;
+    detail = loanDetail;
+  } catch (error) {
+    throw new Error(
+      `Failed to fetch loan data: ${error instanceof Error ? error.message : 'server did not respond. Please check your connection and try again.'}`,
+    );
+  }
+
+  const loan = detail.loan;
+  let doc: jsPDF;
+  try {
+    doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    addHeader(doc, businessName, `Loan Statement - ${loan.loan_number}`);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text(`${customerName} - ${loan.loan_number}`, 12, 34);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text(`Generated ${displayDate(new Date().toISOString(), true)}`, 12, 40);
+
+    autoTable(doc, {
+      startY: 45,
+      theme: 'grid',
+      styles: { fontSize: 7.5, cellPadding: 1.7 },
+      headStyles: { fillColor: [24, 94, 62], textColor: 255 },
+      head: [['Loan Detail', 'Value', 'Loan Detail', 'Value']],
+      body: [
+        ['Status', loan.status, 'Loan date', displayDate(loan.loan_date)],
+        ['Principal', amount(loan.principal), 'Total payable', amount(loan.total_payable)],
+        ['Interest amount', amount(loan.interest_amount), 'Interest rate', `${Number(loan.interest_rate || 0)}%`],
+        ['Installment', amount(loan.emi_amount), 'Frequency / tenure', `${loanTypeLabel(loan.emi_frequency)} x ${loan.tenure_count}`],
+        ['Collected', amount(loan.received_till_today), 'Remaining', amount(loan.remaining)],
+        ['Expected till today', amount(loan.expected_till_today), 'Due till today', amount(loan.due_till_today)],
+        ['Advance balance', amount(loan.advance_balance), 'Penalty added', amount(loan.total_penalty)],
+        ['Disbursement', loan.disbursed_mode ? `${loan.disbursed_mode.replaceAll('_', ' ')} - ${displayDate(loan.disbursed_at, true)}` : '-', 'Closed', displayDate(loan.closed_at, true)],
+        ['Waiver', amount(loan.waiver_amount), 'Rejection reason', value(loan.rejected_reason)],
+      ],
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 38 }, 1: { cellWidth: 55 }, 2: { fontStyle: 'bold', cellWidth: 38 }, 3: { cellWidth: 55 } },
+      margin: { left: 12, right: 12 },
+    });
+
+    const statementY = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
+    const entries = [...detail.collections].sort((a, b) => a.entry_date.localeCompare(b.entry_date) || a.collected_at.localeCompare(b.collected_at));
+    autoTable(doc, {
+      startY: statementY,
+      theme: 'grid',
+      styles: { fontSize: 6.7, cellPadding: 1.25, valign: 'middle' },
+      headStyles: { fillColor: [55, 55, 55], textColor: 255 },
+      head: [['Date', 'EMI', 'Due Date', 'Amount', 'Penalty', 'Type', 'Mode', 'Timing', 'Agent', 'Note']],
+      body: entries.map((entry) => [
+        displayDate(entry.entry_date), entry.installment_no ?? '-', displayDate(entry.due_date),
+        amount(entry.amount), amount(Number(entry.penalty) + Number(entry.missed_penalty ?? 0)),
+        entry.type, Number(entry.amount) + Number(entry.penalty) === 0 ? '-' : entry.mode.replaceAll('_', ' '),
+        entry.timing.replaceAll('_', ' '), value(entry.agent_name), value(entry.note),
+      ]),
+      margin: { left: 7, right: 7, top: 10, bottom: 12 },
+      didDrawPage: (data) => {
+        if (data.pageNumber > 1) {
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(9);
+          doc.text(`${loan.loan_number} - statement continued`, 7, 7);
+        }
+      },
+    });
+    if (!entries.length) {
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(9);
+      doc.text('No collection entries recorded for this loan.', 12, statementY + 8);
+    }
+  } catch (error) {
+    throw new Error(
+      `Failed to build statement PDF: ${error instanceof Error ? error.message : 'unexpected error while generating statement.'}`,
+    );
+  }
+
+  let pdf: PDFDocument;
+  try {
+    pdf = await PDFDocument.load(doc.output('arraybuffer'));
+  } catch (error) {
+    throw new Error(
+      `Failed to initialise PDF document: ${error instanceof Error ? error.message : 'the generated statement could not be processed.'}`,
+    );
+  }
+
+  const regularFont = await pdf.embedFont(StandardFonts.Helvetica);
+  const pages = pdf.getPages();
+  pages.forEach((page, index) => {
+    const pageWidth = page.getWidth();
+    page.drawText(`${businessName}  |  ${customerName}  |  ${loan.loan_number}  |  Page ${index + 1} of ${pages.length}`, {
+      x: 24, y: 12, size: 7, font: regularFont, color: rgb(0.35, 0.35, 0.35),
+      maxWidth: pageWidth - 48,
+    });
+  });
+
+  let bytes: Uint8Array;
+  try {
+    bytes = await pdf.save();
+  } catch (error) {
+    throw new Error(
+      `Failed to save PDF: ${error instanceof Error ? error.message : 'the statement could not be finalised.'}`,
+    );
+  }
+
+  const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${safeFilePart(customerName)} ${safeFilePart(loan.loan_number)} Statement.pdf`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}

@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
-import { ArrowUpDown, CheckCircle2, Edit2, History, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { ArrowUpDown, CheckCircle2, Download, Edit2, History, Loader2, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { apiDelete, apiGet, apiPost, apiPut } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { date, dateTime, money } from '@/lib/format';
+import { downloadLoanStatementPdf } from '@/lib/customer-complete-pdf';
 import { loanTypeLabel } from '@/lib/loan-type';
 import { DataTable } from '@/components/app/data-table';
 import { PageShell } from '@/components/app/page-shell';
@@ -135,6 +136,8 @@ export default function LoansPage() {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('latest');
   const [page, setPage] = useState(1);
+  const [statementPdfLoading, setStatementPdfLoading] = useState(false);
+  const [statementPdfError, setStatementPdfError] = useState<string | null>(null);
   // Customer picker in the create-loan form: type-to-search instead of a
   // giant <select> (customer list will grow past 1000+).
   const [customerQuery, setCustomerQuery] = useState('');
@@ -483,8 +486,31 @@ export default function LoansPage() {
           <CardHeader>
             <CardTitle className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <span>Payment History - {historyLoan.loan_number}</span>
-              <Button type="button" variant="outline" size="sm" onClick={() => setHistoryLoan(null)}>Close</Button>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={statementPdfLoading}
+                  onClick={async () => {
+                    setStatementPdfLoading(true);
+                    setStatementPdfError(null);
+                    try {
+                      await downloadLoanStatementPdf(historyLoan.id, historyLoan.customer_name);
+                    } catch (pdfFailure) {
+                      setStatementPdfError(pdfFailure instanceof Error ? pdfFailure.message : 'Unable to create the statement PDF.');
+                    } finally {
+                      setStatementPdfLoading(false);
+                    }
+                  }}
+                >
+                  {statementPdfLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  {statementPdfLoading ? 'Preparing…' : 'Download Statement'}
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => setHistoryLoan(null)}>Close</Button>
+              </div>
             </CardTitle>
+            {statementPdfError && <div className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{statementPdfError}</div>}
             <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
               <span>Customer: <span className="font-medium text-foreground">{historyLoan.customer_name}</span></span>
               <span>Loan Amount: <span className="font-medium text-foreground">{money(historyLoan.principal)}</span></span>
