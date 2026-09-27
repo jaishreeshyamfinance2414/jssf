@@ -3,10 +3,10 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
-import { IndianRupee, Eye, EyeOff, Loader2, Pencil, Trash2, XCircle } from 'lucide-react';
-import { apiDelete, apiGet, apiPost, apiPut } from '@/lib/api';
+import { IndianRupee, Loader2, XCircle } from 'lucide-react';
+import { apiGet, apiPost } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { date, dateTime, money } from '@/lib/format';
+import { date, money } from '@/lib/format';
 import { PageShell } from '@/components/app/page-shell';
 import { DataTable } from '@/components/app/data-table';
 import { StatusPill } from '@/components/app/status-pill';
@@ -23,7 +23,6 @@ interface Due {
   due_date: string;
   due_amount: string;
   collection_due: string;
-  paid_amount: string;
   status: string;
   today_status: 'pending';
   principal: string;
@@ -35,7 +34,6 @@ interface Due {
   received: string;
   remaining: string;
 }
-interface Collection { id: string; loan_number: string; customer_name: string; amount: string; penalty: string; type: string; mode: string; entry_date: string; agent_name: string | null; agent_ledger_id: string | null; missed_penalty: string | null; note: string | null }
 interface LoanSearchResult {
   id: string;
   loan_number: string;
@@ -56,8 +54,6 @@ interface LoanSearchResult {
     status: string;
   };
 }
-
-const TYPE_LABEL: Record<string, string> = { full: 'Full', partial: 'Partial', advance: 'Advance', missed: 'Missed' };
 
 const SORT_OPTIONS = [
   { value: 'due_date_asc', label: 'Due date (oldest first)' },
@@ -108,23 +104,15 @@ function indiaLocalToIso(value: string): string {
   return new Date(`${value}${INDIA_OFFSET}`).toISOString();
 }
 
-function indiaTimestampToLocal(value: string): string {
-  return new Date(new Date(value).getTime() + 330 * 60 * 1000).toISOString().slice(0, 19);
-}
-
 export default function CollectionsPage() {
   const qc = useQueryClient();
-  const { can, user } = useAuth();
+  const { user } = useAuth();
   const [manual, setManual] = useState({ amount: '', mode: 'cash', entryDate: indiaNowLocal() });
   const [search, setSearch] = useState('');
   const [selectedLoan, setSelectedLoan] = useState<LoanSearchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showLedger, setShowLedger] = useState(false);
-  const [editing, setEditing] = useState<Collection | null>(null);
-  const [editForm, setEditForm] = useState({ amount: '', penalty: '', type: 'full', entryDate: '' });
   const [sort, setSort] = useState<SortKey>('due_date_asc');
   const { data: due = [] } = useQuery({ queryKey: ['collections', 'due'], queryFn: () => apiGet<Due[]>('/collections/due') });
-  const { data: collections = [] } = useQuery({ queryKey: ['collections'], queryFn: () => apiGet<Collection[]>('/collections') });
   const { data: searchResults = [] } = useQuery({
     queryKey: ['loan-search', search],
     queryFn: () => apiGet<LoanSearchResult[]>(`/loans/search?q=${encodeURIComponent(search)}`),
@@ -157,38 +145,6 @@ export default function CollectionsPage() {
   });
   // The EMI row a record-mutation is currently saving for (drives per-row spinners).
   const pendingEmiId = record.isPending ? (record.variables as { emiId?: string } | undefined)?.emiId : undefined;
-  const remove = useMutation({
-    mutationFn: (id: string) => apiDelete(`/collections/${id}`),
-    onSuccess: () => {
-      setError(null);
-      return invalidate();
-    },
-    onError: (err) => {
-      const ax = err as AxiosError<{ error?: { message?: string } }>;
-      setError(ax.response?.data?.error?.message ?? 'Unable to delete collection entry.');
-    },
-  });
-  const update = useMutation({
-    mutationFn: (input: { id: string; body: Record<string, unknown> }) => apiPut(`/collections/${input.id}`, input.body),
-    onSuccess: () => {
-      setError(null);
-      setEditing(null);
-      return invalidate();
-    },
-    onError: (err) => {
-      const ax = err as AxiosError<{ error?: { message?: string } }>;
-      setError(ax.response?.data?.error?.message ?? 'Unable to update collection entry.');
-    },
-  });
-  const startEdit = (c: Collection) => {
-    setEditing(c);
-    setEditForm({
-      amount: String(Number(c.amount)),
-      penalty: String(Number(c.penalty)),
-      type: c.type,
-      entryDate: indiaTimestampToLocal(c.entry_date),
-    });
-  };
   return (
     <PageShell title="Collections" description="Daily EMI collection desk for field agents, with cash/bank posting into business accounts.">
       <Card>
@@ -342,12 +298,11 @@ export default function CollectionsPage() {
         </label>
       </div>
       <DataTable
-        columns={['Loan No', 'Customer', 'EMI', 'Paid', "Today's Status", 'EMIs Missed', 'Due Till Today', 'Start Date', 'Closing Date', 'Loan Amount', 'Received', 'Remaining', 'Collect']}
+        columns={['Loan No', 'Customer', 'EMI', "Today's Status", 'EMIs Missed', 'Due Till Today', 'Start Date', 'Closing Date', 'Loan Amount', 'Received', 'Remaining', 'Collect']}
         rows={sortDue(due, sort).map((d) => [
-          d.loan_number,
+          d.loan_number.slice(-4),
           `${d.customer_name} (${d.customer_mobile})`,
-          <span key={`${d.id}-emi`}>{money(d.due_amount)} <span className="text-xs text-muted-foreground">({date(d.due_date)})</span></span>,
-          money(d.paid_amount),
+          money(d.due_amount),
           <StatusPill key={d.id} value={d.today_status} />,
           d.missed_count > 0 ? <span key={`${d.id}-miss`} className="font-medium text-danger">{d.missed_count}</span> : '0',
           <span key={`${d.id}-due`} className="font-medium">{money(d.due_till_today)}</span>,
@@ -381,129 +336,6 @@ export default function CollectionsPage() {
         ])}
         empty="No due EMIs"
       />
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-muted-foreground">Collection Ledger</h2>
-        <Button size="sm" variant="outline" onClick={() => setShowLedger((v) => !v)}>
-          {showLedger ? <><EyeOff className="h-4 w-4" /> Hide ledger</> : <><Eye className="h-4 w-4" /> Show ledger</>}
-        </Button>
-      </div>
-      {editing && (
-        <Card>
-          <CardHeader><CardTitle>Edit Entry — {editing.loan_number} / {editing.customer_name}</CardTitle></CardHeader>
-          <CardContent>
-            <form
-              className="grid gap-3 md:grid-cols-5"
-              onSubmit={(e) => {
-                e.preventDefault();
-                const body: Record<string, unknown> = { type: editForm.type };
-                if (user?.role === 'admin') body.entryDate = indiaLocalToIso(editForm.entryDate);
-                if (editForm.type !== 'missed') {
-                  body.amount = Number(editForm.amount);
-                  body.penalty = Number(editForm.penalty || 0);
-                } else {
-                  body.amount = 0;
-                  body.penalty = 0;
-                }
-                update.mutate({ id: editing.id, body });
-              }}
-            >
-              <select
-                className="h-10 rounded-md border bg-background px-3 text-sm"
-                value={editForm.type}
-                onChange={(e) => {
-                  const t = e.target.value;
-                  setEditForm({
-                    ...editForm,
-                    type: t,
-                    amount: t === 'missed' ? '0' : editForm.amount === '0' ? '' : editForm.amount,
-                    penalty: t === 'missed' ? '0' : editForm.penalty,
-                  });
-                }}
-              >
-                <option value="full">Paid (Full)</option>
-                <option value="partial">Paid (Partial)</option>
-                <option value="advance">Paid (Advance)</option>
-                <option value="missed">Missed (₹0)</option>
-              </select>
-              <Input
-                type="number"
-                step="0.01"
-                placeholder="Amount"
-                value={editForm.amount}
-                onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })}
-                disabled={editForm.type === 'missed'}
-                required={editForm.type !== 'missed'}
-              />
-              <Input
-                type="number"
-                step="0.01"
-                placeholder="Penalty"
-                value={editForm.penalty}
-                onChange={(e) => setEditForm({ ...editForm, penalty: e.target.value })}
-                disabled={editForm.type === 'missed'}
-              />
-              <Input
-                type="datetime-local"
-                step="1"
-                max={indiaNowLocal()}
-                value={editForm.entryDate}
-                onChange={(e) => setEditForm({ ...editForm, entryDate: e.target.value })}
-                disabled={user?.role !== 'admin'}
-                required
-              />
-              <div className="flex gap-2">
-                <Button disabled={update.isPending}>Save</Button>
-                <Button type="button" variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      )}
-      {showLedger && (
-        <DataTable
-          columns={['Date & Time', 'Loan', 'Customer', 'Amount', 'Penalty', 'Type', 'Mode', 'Agent', 'Action']}
-          rows={collections.map((c) => {
-            const isCoverageMarker = Number(c.amount) === 0 && ['advance', 'full'].includes(c.type) && c.note?.startsWith('Auto-marked:');
-            const canModifyCoverageMarker = !isCoverageMarker || user?.role === 'admin';
-            return [
-              dateTime(c.entry_date),
-              c.loan_number,
-              c.customer_name,
-              money(c.amount),
-              Number(c.missed_penalty) > 0
-                ? <span key={`${c.id}-pen`}><span className="font-medium text-danger">+{money(c.missed_penalty ?? 0)} added</span>{Number(c.penalty) > 0 && <span className="block text-xs">{money(c.penalty)} collected</span>}</span>
-                : money(c.penalty),
-              <StatusPill key={`${c.id}-type`} value={TYPE_LABEL[c.type] ?? c.type} />,
-              Number(c.amount) + Number(c.penalty) === 0 ? '-' : c.mode === 'cash' ? 'Cash' : 'UPI/Bank',
-              isCoverageMarker ? 'Automatic' : c.agent_name ?? '-',
-              <div key={c.id} className="flex flex-wrap gap-2">
-                {isCoverageMarker && user?.role !== 'admin' ? (
-                  <span className="text-xs text-muted-foreground">System entry</span>
-                ) : can('collection.update') && canModifyCoverageMarker && (
-                  <Button size="sm" variant="outline" disabled={update.isPending} onClick={() => startEdit(c)}>
-                    <Pencil className="h-4 w-4" /> Edit
-                  </Button>
-                )}
-                {canModifyCoverageMarker && can('collection.delete') && (
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    disabled={remove.isPending}
-                    onClick={() => {
-                      if (confirm(`Delete this collection of ${money(c.amount)} for loan ${c.loan_number}? The loan balance and EMI will be restored.`)) {
-                        remove.mutate(c.id);
-                      }
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4" /> Delete
-                  </Button>
-                )}
-                {!isCoverageMarker && !can('collection.update') && !can('collection.delete') && '-'}
-              </div>,
-            ];
-          })}
-        />
-      )}
     </PageShell>
   );
 }
