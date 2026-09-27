@@ -10,12 +10,12 @@ export const loanBalanceJoin = `
  ) receipts ON true
  LEFT JOIN LATERAL (
    SELECT COALESCE(sum(p.amount),0) AS total,
-          COALESCE(sum(p.amount) FILTER (WHERE p.penalty_date < CURRENT_DATE),0) AS before_today
-     FROM loan_daily_penalties p WHERE p.loan_id = l.id AND p.penalty_date < CURRENT_DATE
+          COALESCE(sum(p.amount) FILTER (WHERE p.penalty_date < (now() AT TIME ZONE 'Asia/Kolkata')::date),0) AS before_today
+     FROM loan_daily_penalties p WHERE p.loan_id = l.id AND p.penalty_date < (now() AT TIME ZONE 'Asia/Kolkata')::date
  ) charges ON true
  LEFT JOIN LATERAL (
-   SELECT COALESCE(sum(e.due_amount) FILTER (WHERE e.due_date <= CURRENT_DATE),0) + charges.total AS expected,
-          COALESCE(sum(e.due_amount) FILTER (WHERE e.due_date < CURRENT_DATE),0) + charges.before_today AS expected_before_today,
+   SELECT COALESCE(sum(e.due_amount) FILTER (WHERE e.due_date <= (now() AT TIME ZONE 'Asia/Kolkata')::date),0) + charges.total AS expected,
+          COALESCE(sum(e.due_amount) FILTER (WHERE e.due_date < (now() AT TIME ZONE 'Asia/Kolkata')::date),0) + charges.before_today AS expected_before_today,
           charges.total AS penalty,
           CASE WHEN l.closed_by IS NOT NULL THEN l.total_payable
                ELSE COALESCE(sum(e.due_amount),l.emi_amount * l.tenure_count) + charges.total END AS total_payable,
@@ -30,12 +30,12 @@ export const loanBalanceJoin = `
           GREATEST(dues.total_payable - receipts.received,0) AS remaining
  ) balance ON true
  LEFT JOIN LATERAL (
-   SELECT count(*) FILTER (WHERE s.due_date < CURRENT_DATE AND s.running_due > receipts.received)::int AS missed_count,
-          count(*) FILTER (WHERE s.due_date > CURRENT_DATE AND s.running_due <= receipts.received)::int AS advance_count,
+   SELECT count(*) FILTER (WHERE s.due_date < (now() AT TIME ZONE 'Asia/Kolkata')::date AND s.running_due > receipts.received)::int AS missed_count,
+          count(*) FILTER (WHERE s.due_date > (now() AT TIME ZONE 'Asia/Kolkata')::date AND s.running_due <= receipts.received)::int AS advance_count,
           min(s.due_date) FILTER (WHERE s.running_due > receipts.received) AS next_due_date
    FROM (SELECT e.due_date, sum(e.due_amount) OVER (ORDER BY e.installment_no)
            + COALESCE((SELECT sum(p.amount) FROM loan_daily_penalties p
                         WHERE p.loan_id = e.loan_id AND p.penalty_date <= e.due_date
-                          AND p.penalty_date < CURRENT_DATE),0) AS running_due
+                          AND p.penalty_date < (now() AT TIME ZONE 'Asia/Kolkata')::date),0) AS running_due
            FROM emi_schedule e WHERE e.loan_id = l.id) s
  ) coverage ON true`;

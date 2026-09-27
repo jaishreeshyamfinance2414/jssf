@@ -131,7 +131,8 @@ export const collectionRepository = {
     // for the collection desk table (missed count, due-till-today incl.
     // penalty, received, remaining, dates).
     const { rows } = await query(
-      `SELECT e.*, l.loan_number, l.principal, dues.total_payable, l.loan_date::text AS start_date,
+      `SELECT e.*, 'pending'::text AS today_status,
+              l.loan_number, l.principal, dues.total_payable, l.loan_date::text AS start_date,
               LEAST(l.emi_amount,balance.shortfall)::text AS collection_due,
               c.full_name AS customer_name, c.mobile AS customer_mobile,
               coverage.missed_count, balance.shortfall::text AS due_till_today,
@@ -144,7 +145,7 @@ export const collectionRepository = {
          ${loanBalanceJoin}
         WHERE l.status = 'active'
           AND e.due_date = COALESCE(coverage.next_due_date,dues.closing_date)
-          AND e.due_date <= CURRENT_DATE AND balance.shortfall > 0
+          AND e.due_date <= (now() AT TIME ZONE 'Asia/Kolkata')::date AND balance.shortfall > 0
           AND NOT EXISTS (SELECT 1 FROM collections today WHERE today.loan_id = l.id
             AND (today.entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date)
         ORDER BY e.due_date ASC

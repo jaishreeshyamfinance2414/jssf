@@ -25,6 +25,7 @@ interface Due {
   collection_due: string;
   paid_amount: string;
   status: string;
+  today_status: 'pending';
   principal: string;
   total_payable: string;
   start_date: string;
@@ -341,13 +342,13 @@ export default function CollectionsPage() {
         </label>
       </div>
       <DataTable
-        columns={['Loan No', 'Customer', 'EMI', 'Paid', 'Status', 'EMIs Missed', 'Due Till Today', 'Start Date', 'Closing Date', 'Loan Amount', 'Received', 'Remaining', 'Collect']}
+        columns={['Loan No', 'Customer', 'EMI', 'Paid', "Today's Status", 'EMIs Missed', 'Due Till Today', 'Start Date', 'Closing Date', 'Loan Amount', 'Received', 'Remaining', 'Collect']}
         rows={sortDue(due, sort).map((d) => [
           d.loan_number,
           `${d.customer_name} (${d.customer_mobile})`,
           <span key={`${d.id}-emi`}>{money(d.due_amount)} <span className="text-xs text-muted-foreground">({date(d.due_date)})</span></span>,
           money(d.paid_amount),
-          <StatusPill key={d.id} value={d.status} />,
+          <StatusPill key={d.id} value={d.today_status} />,
           d.missed_count > 0 ? <span key={`${d.id}-miss`} className="font-medium text-danger">{d.missed_count}</span> : '0',
           <span key={`${d.id}-due`} className="font-medium">{money(d.due_till_today)}</span>,
           date(d.start_date),
