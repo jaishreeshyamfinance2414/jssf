@@ -242,7 +242,7 @@ export const dashboardRepository = {
               COALESCE(sum(COALESCE(p.principal_paid,0)),0)::text principal_paid,
               COALESCE(sum(COALESCE(p.interest_paid,0)),0)::text interest_paid,
               COALESCE(sum(CASE WHEN bl.status='closed' THEN 0
-                                WHEN bl.loan_type='reducing_balance' THEN COALESCE(s.overdue,0)
+                                WHEN bl.loan_type<>'interest_only' THEN COALESCE(s.overdue,0)
                                 WHEN CURRENT_DATE <= bl.first_payment_date THEN 0
                                 ELSE GREATEST(0,COALESCE(io.due_count,0)-COALESCE(p.payment_count,0)::int)
                            END),0)::text overdue
@@ -270,22 +270,26 @@ export const dashboardRepository = {
   },
 
   async borrowedLoanReminders(): Promise<Array<{
-    loanId: string; lenderName: string; loanType: string; paymentDate: string; amount: number; overdue: boolean;
+    loanId: string; lenderName: string; loanType: string; paymentDate: string; amount: number;
+    principal: number; interest: number; overdue: boolean;
   }>> {
     const { rows } = await query<{
       id: string; lender_name: string; loan_type: string; payment_date: string; amount: string;
+      principal: string; interest: string;
     }>(
       `SELECT bl.id,bl.lender_name,bl.loan_type,
-              CASE WHEN bl.loan_type='reducing_balance' THEN ns.due_date
+              CASE WHEN bl.loan_type<>'interest_only' THEN ns.due_date
                    ELSE (bl.first_payment_date + (COALESCE(p.payment_count,0)::int * interval '1 month'))::date
                END::text payment_date,
-              CASE WHEN bl.loan_type='reducing_balance' THEN ns.total_due ELSE bl.periodic_interest END::text amount
+              CASE WHEN bl.loan_type<>'interest_only' THEN ns.total_due ELSE bl.periodic_interest END::text amount,
+              CASE WHEN bl.loan_type<>'interest_only' THEN ns.principal_due ELSE 0 END::text principal,
+              CASE WHEN bl.loan_type<>'interest_only' THEN ns.interest_due ELSE bl.periodic_interest END::text interest
          FROM borrowed_loans bl
          LEFT JOIN LATERAL (
            SELECT count(*) payment_count FROM borrowed_loan_payments WHERE loan_id=bl.id
          ) p ON true
          LEFT JOIN LATERAL (
-           SELECT due_date,total_due FROM borrowed_loan_schedule
+           SELECT due_date,principal_due,interest_due,total_due FROM borrowed_loan_schedule
             WHERE loan_id=bl.id AND paid_at IS NULL ORDER BY installment_no LIMIT 1
          ) ns ON true
         WHERE bl.status='active'
@@ -300,6 +304,8 @@ export const dashboardRepository = {
       loanType: row.loan_type,
       paymentDate: row.payment_date,
       amount: Number(row.amount),
+      principal: Number(row.principal),
+      interest: Number(row.interest),
       overdue: row.payment_date < today,
     }));
   },

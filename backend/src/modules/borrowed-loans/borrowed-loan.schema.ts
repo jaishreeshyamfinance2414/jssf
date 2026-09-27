@@ -5,7 +5,7 @@ const todayInIndia = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ko
 
 export const createBorrowedLoanSchema = z.object({
   lenderName: z.string().trim().min(2, 'Lender name is required'),
-  loanType: z.enum(['reducing_balance', 'interest_only']),
+  loanType: z.enum(['reducing_balance', 'interest_only', 'credit_card', 'personal_borrowed']),
   receivingAccountId: z.string().uuid(),
   loanAmount: z.coerce.number().positive('Loan amount must be greater than zero'),
   receivedDate: isoDate,
@@ -13,6 +13,7 @@ export const createBorrowedLoanSchema = z.object({
   installmentCount: z.coerce.number().int().positive().optional(),
   installmentAmount: z.coerce.number().positive().optional(),
   interestPaymentAmount: z.coerce.number().positive().optional(),
+  interestAmount: z.coerce.number().min(0, 'Interest cannot be negative').optional(),
   note: z.string().trim().optional().nullable(),
 }).superRefine((value, ctx) => {
   if (value.receivedDate > todayInIndia()) {
@@ -27,8 +28,10 @@ export const createBorrowedLoanSchema = z.object({
     if (value.installmentCount && value.installmentAmount && value.installmentCount * value.installmentAmount < value.loanAmount) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['installmentAmount'], message: 'Total payable cannot be less than the borrowed amount' });
     }
-  } else if (!value.interestPaymentAmount) {
+  } else if (value.loanType === 'interest_only' && !value.interestPaymentAmount) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['interestPaymentAmount'], message: 'Monthly interest amount is required' });
+  } else if ((value.loanType === 'credit_card' || value.loanType === 'personal_borrowed') && value.interestAmount == null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['interestAmount'], message: 'Interest amount is required (enter zero when there is no interest)' });
   }
 });
 

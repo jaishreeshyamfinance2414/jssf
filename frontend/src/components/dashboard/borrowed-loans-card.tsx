@@ -8,6 +8,13 @@ export function BorrowedLoansCard({ summary, reminders }: {
   summary: NonNullable<DashboardData['borrowedLoans']>;
   reminders: NonNullable<DashboardData['borrowedLoanReminders']>;
 }) {
+  const loanTypeLabel = (type: string) => ({
+    reducing_balance: 'EMI',
+    interest_only: 'Interest-only',
+    credit_card: 'Credit Card Loan',
+    personal_borrowed: 'Personal Borrowed',
+  }[type] ?? type);
+
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between space-y-0">
@@ -28,7 +35,11 @@ export function BorrowedLoansCard({ summary, reminders }: {
           <p className="mb-2 text-sm font-semibold">Upcoming payment dates</p>
           {reminders.length ? <div className="grid gap-2 md:grid-cols-2">
             {reminders.map((item) => <div key={item.loanId} className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm ${item.overdue ? 'border-danger/40 bg-danger/5' : ''}`}>
-              <div><p className="font-medium">{item.lenderName}</p><p className="text-xs text-muted-foreground">{item.loanType === 'reducing_balance' ? 'EMI' : 'Interest'} · {date(item.paymentDate)}</p></div>
+              <div>
+                <p className="font-medium">{item.lenderName}</p>
+                <p className="text-xs text-muted-foreground">{loanTypeLabel(item.loanType)} · Due {date(item.paymentDate)}</p>
+                <p className="text-xs text-muted-foreground">Principal {money(item.principal)} · Interest {money(item.interest)}</p>
+              </div>
               <div className="text-right"><p className="font-semibold">{money(item.amount)}</p>{item.overdue && <p className="flex items-center gap-1 text-xs text-danger"><AlertTriangle className="h-3 w-3" /> Overdue</p>}</div>
             </div>)}
           </div> : <p className="text-sm text-muted-foreground">No active borrowed-loan payments due.</p>}

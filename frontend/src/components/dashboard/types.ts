@@ -62,6 +62,8 @@ export interface DashboardData {
     loanType: string;
     paymentDate: string;
     amount: number;
+    principal: number;
+    interest: number;
     overdue: boolean;
   }>;
 }

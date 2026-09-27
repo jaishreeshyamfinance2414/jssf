@@ -17,10 +17,17 @@ function addMonths(date: string, months: number): string {
 
 export const borrowedLoanService = {
   async create(input: CreateBorrowedLoanBody, actorId: string, ip?: string | null) {
+    const isFixedRepayment = input.loanType === 'credit_card' || input.loanType === 'personal_borrowed';
+    const totalInterest = isFixedRepayment
+      ? round2(input.interestAmount!)
+      : input.loanType === 'reducing_balance'
+        ? round2(input.installmentCount! * input.installmentAmount! - input.loanAmount)
+        : 0;
     const totalPayable = input.loanType === 'reducing_balance'
       ? round2(input.installmentCount! * input.installmentAmount!)
-      : undefined;
-    const totalInterest = totalPayable == null ? 0 : round2(totalPayable - input.loanAmount);
+      : isFixedRepayment
+        ? round2(input.loanAmount + totalInterest)
+        : undefined;
 
     return withTransaction(async (client) => {
       const loan = await borrowedLoanRepository.create({
@@ -57,6 +64,14 @@ export const borrowedLoanService = {
           };
         });
         await borrowedLoanRepository.createSchedule(loan.id, schedule, client);
+      } else if (isFixedRepayment) {
+        await borrowedLoanRepository.createSchedule(loan.id, [{
+          installmentNo: 1,
+          dueDate: input.firstPaymentDate,
+          principal: input.loanAmount,
+          interest: totalInterest,
+          total: totalPayable!,
+        }], client);
       }
 
       await ledgerService.post(client, {
@@ -92,7 +107,7 @@ export const borrowedLoanService = {
       let interest = 0;
       let scheduleId: string | undefined;
 
-      if (loan.loan_type === 'reducing_balance') {
+      if (loan.loan_type !== 'interest_only') {
         const schedule = await borrowedLoanRepository.nextSchedule(loanId, client);
         if (!schedule) throw BadRequest('All EMIs for this loan are already paid');
         principal = Number(schedule.principal_due);

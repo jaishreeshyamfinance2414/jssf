@@ -4,7 +4,7 @@ import { query } from '../../db/pool';
 export interface BorrowedLoanRow {
   id: string;
   lender_name: string;
-  loan_type: 'reducing_balance' | 'interest_only';
+  loan_type: 'reducing_balance' | 'interest_only' | 'credit_card' | 'personal_borrowed';
   receiving_account_id: string;
   original_principal: string;
   installment_count: number | null;
@@ -55,10 +55,10 @@ export const borrowedLoanRepository = {
               COALESCE(p.interest_paid,0)::text AS interest_paid,
               (bl.original_principal - COALESCE(p.principal_paid,0))::text AS outstanding_principal,
               CASE WHEN bl.status='closed' THEN NULL
-                   WHEN bl.loan_type='reducing_balance' THEN ns.due_date
+                   WHEN bl.loan_type<>'interest_only' THEN ns.due_date
                    ELSE (bl.first_payment_date + (COALESCE(p.payment_count,0)::int * interval '1 month'))::date END AS next_payment_date,
               CASE WHEN bl.status='closed' THEN NULL
-                   WHEN bl.loan_type='reducing_balance' THEN ns.total_due ELSE bl.periodic_interest END::text AS next_payment_amount,
+                   WHEN bl.loan_type<>'interest_only' THEN ns.total_due ELSE bl.periodic_interest END::text AS next_payment_amount,
               COALESCE(ov.overdue_count,0)::int AS overdue_payments
          FROM borrowed_loans bl
          JOIN accounts a ON a.id=bl.receiving_account_id
@@ -77,7 +77,7 @@ export const borrowedLoanRepository = {
          ) io ON bl.loan_type='interest_only'
          LEFT JOIN LATERAL (
            SELECT CASE WHEN bl.status='closed' THEN 0
-                  WHEN bl.loan_type='reducing_balance' THEN
+                  WHEN bl.loan_type<>'interest_only' THEN
                     count(*) FILTER (WHERE s.paid_at IS NULL AND s.due_date < CURRENT_DATE)
                   WHEN CURRENT_DATE <= bl.first_payment_date THEN 0
                   ELSE GREATEST(0, COALESCE(io.due_count,0) - COALESCE(p.payment_count,0)::int)
