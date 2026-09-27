@@ -4,12 +4,13 @@ import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
 import { useRouter } from 'next/navigation';
-import { ArrowUpDown, Eye, History, Loader2, Plus, Power, PowerOff, Search, Trash2, Upload } from 'lucide-react';
+import { ArrowUpDown, Download, Eye, History, Loader2, Plus, Power, PowerOff, Search, Trash2, Upload } from 'lucide-react';
 import { api, apiDelete, apiGet, fetchFileUrl } from '@/lib/api';
 import { compressFormImages, compressImageFile } from '@/lib/compress-image';
 import { useAuth } from '@/lib/auth-context';
 import { date, dateTime, money } from '@/lib/format';
 import { loanTypeLabel } from '@/lib/loan-type';
+import { downloadCompleteCustomerPdf } from '@/lib/customer-complete-pdf';
 import { PageShell } from '@/components/app/page-shell';
 import { Pagination } from '@/components/app/pagination';
 import { DataTable } from '@/components/app/data-table';
@@ -134,6 +135,8 @@ export default function CustomersPage() {
   const [sort, setSort] = useState<SortKey>('latest');
   const [status, setStatus] = useState<StatusFilter>('active');
   const [page, setPage] = useState(1);
+  const [pdfCustomerId, setPdfCustomerId] = useState<string | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
   const { data: customers = [] } = useQuery({
     queryKey: ['customers', status],
     queryFn: () => apiGet<Customer[]>(`/customers?status=${status}`),
@@ -419,7 +422,7 @@ export default function CustomersPage() {
                   ))}
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button disabled={create.isPending}>Save Customer</Button>
                 <Button type="button" variant="outline" onClick={closeCreateForm}>Cancel</Button>
               </div>
@@ -435,7 +438,27 @@ export default function CustomersPage() {
           <CardHeader>
             <CardTitle className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <span>{selected.full_name} <span className="text-sm font-normal text-muted-foreground">(File #{selected.file_number})</span></span>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={pdfCustomerId === selected.id}
+                  onClick={async () => {
+                    setPdfCustomerId(selected.id);
+                    setPdfError(null);
+                    try {
+                      await downloadCompleteCustomerPdf(selected);
+                    } catch (pdfFailure) {
+                      setPdfError(pdfFailure instanceof Error ? pdfFailure.message : 'Unable to create the customer PDF.');
+                    } finally {
+                      setPdfCustomerId(null);
+                    }
+                  }}
+                >
+                  {pdfCustomerId === selected.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  {pdfCustomerId === selected.id ? 'Preparing PDF…' : 'Download Complete Data'}
+                </Button>
                 {can('customer.delete') && (() => {
                   const loans = selected.loans ?? [];
                   const hasActiveLoan = loans.some((l) => l.status === 'active');
@@ -470,6 +493,7 @@ export default function CustomersPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
+            {pdfError && <div className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{pdfError}</div>}
             <div className="grid gap-3 md:grid-cols-3">
               <Info label="File Number" value={String(selected.file_number)} />
               <Info label="Mobile" value={selected.mobile} />
