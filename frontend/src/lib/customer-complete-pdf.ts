@@ -225,12 +225,12 @@ export function buildCustomerDataPages(customer: CompleteCustomerData, loans: Lo
       theme: 'grid',
       styles: { fontSize: 6.7, cellPadding: 1.25, valign: 'middle' },
       headStyles: { fillColor: [55, 55, 55], textColor: 255 },
-      head: [['Date', 'EMI', 'Due Date', 'Amount', 'Penalty', 'Type', 'Mode', 'Timing', 'Agent', 'Note']],
+      head: [['Date', 'EMI', 'Due Date', 'Amount', 'Penalty', 'Type', 'Mode', 'Timing', 'Agent']],
       body: entries.map((entry) => [
         displayDate(entry.entry_date), entry.installment_no ?? '-', displayDate(entry.due_date),
         amount(entry.amount), amount(Number(entry.penalty) + Number(entry.missed_penalty ?? 0)),
         entry.type, Number(entry.amount) + Number(entry.penalty) === 0 ? '-' : entry.mode.replaceAll('_', ' '),
-        entry.timing.replaceAll('_', ' '), value(entry.agent_name), value(entry.note),
+        entry.timing.replaceAll('_', ' '), value(entry.agent_name),
       ]),
       margin: { left: 7, right: 7, top: 10, bottom: 12 },
       didDrawPage: (data) => {
@@ -452,12 +452,12 @@ export async function downloadLoanStatementPdf(loanId: string, customerName: str
       theme: 'grid',
       styles: { fontSize: 6.7, cellPadding: 1.25, valign: 'middle' },
       headStyles: { fillColor: [55, 55, 55], textColor: 255 },
-      head: [['Date', 'EMI', 'Due Date', 'Amount', 'Penalty', 'Type', 'Mode', 'Timing', 'Agent', 'Note']],
+      head: [['Date', 'EMI', 'Due Date', 'Amount', 'Penalty', 'Type', 'Mode', 'Timing', 'Agent']],
       body: entries.map((entry) => [
         displayDate(entry.entry_date), entry.installment_no ?? '-', displayDate(entry.due_date),
         amount(entry.amount), amount(Number(entry.penalty) + Number(entry.missed_penalty ?? 0)),
         entry.type, Number(entry.amount) + Number(entry.penalty) === 0 ? '-' : entry.mode.replaceAll('_', ' '),
-        entry.timing.replaceAll('_', ' '), value(entry.agent_name), value(entry.note),
+        entry.timing.replaceAll('_', ' '), value(entry.agent_name),
       ]),
       margin: { left: 7, right: 7, top: 10, bottom: 12 },
       didDrawPage: (data) => {
