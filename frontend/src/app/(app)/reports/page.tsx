@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input';
 interface ProfitLoss {
   from: string; to: string;
   collected: number; penaltyIncome: number; disbursed: number;
-  interestBooked: number; expenses: number; salaries: number; capitalIn: number;
+  interestBooked: number; expenses: number; borrowedInterest: number; salaries: number; capitalIn: number;
 }
 interface DailyRow { date: string; entries: string; missed_entries: string; cash: string; digital: string; penalty: string; total: string }
 interface MissedRow { loan_number: string; customer_name: string; mobile: string; area: string; missed_count: string; oldest_due: string; overdue_amount: string; penalty: string; loan_remaining: string }
@@ -47,6 +47,7 @@ const TYPE_LABEL: Record<string, string> = { full: 'Full', partial: 'Partial', a
 const SOURCE_LABEL: Record<string, string> = {
   capital: 'Capital', collection: 'Collection', agent_submission: 'Agent Handover',
   capital_withdrawal: 'Capital Withdrawal',
+  borrowed_loan: 'Borrowed Loan Received', borrowed_loan_payment: 'Borrowed Loan Payment',
   loan_disbursement: 'Disbursement', expense: 'Expense', salary: 'Salary', adjustment: 'Adjustment',
 };
 
@@ -125,7 +126,7 @@ export default function ReportsPage() {
   });
 
   // Net position for P&L: money earned (interest + fees + penalties) minus operating outgo.
-  const plNet = useMemo(() => (pl ? pl.interestBooked + pl.penaltyIncome - pl.expenses - pl.salaries : 0), [pl]);
+  const plNet = useMemo(() => (pl ? pl.interestBooked + pl.penaltyIncome - pl.expenses - pl.borrowedInterest - pl.salaries : 0), [pl]);
 
   const onExport = () => {
     const stamp = `${from}_to_${to}`;
@@ -136,9 +137,10 @@ export default function ReportsPage() {
         ['Interest + fees booked', pl.interestBooked],
         ['Loans disbursed', pl.disbursed],
         ['Expenses', pl.expenses],
+        ['Borrowed loan interest expense', pl.borrowedInterest],
         ['Salaries paid', pl.salaries],
         ['Capital introduced', pl.capitalIn],
-        ['Net (interest + penalty - expenses - salaries)', plNet],
+        ['Net (interest + penalty - expenses - borrowed interest - salaries)', plNet],
       ]);
     } else if (tab === 'daily-collection') {
       exportCsv(`daily-collection_${stamp}.csv`,
@@ -230,13 +232,14 @@ export default function ReportsPage() {
             <Stat label="Capital Introduced" value={money(pl.capitalIn)} />
             <Stat label="Loans Disbursed" value={money(pl.disbursed)} />
             <Stat label="Expenses" value={money(pl.expenses)} tone="text-danger" />
+            <Stat label="Borrowed Loan Interest" value={money(pl.borrowedInterest)} tone="text-danger" />
             <Stat label="Salaries Paid" value={money(pl.salaries)} tone="text-danger" />
             <Stat label="Net (Income − Outgo)" value={money(plNet)} tone={plNet >= 0 ? 'text-success' : 'text-danger'} />
           </div>
           <Card>
             <CardHeader><CardTitle className="flex items-center gap-2"><BarChart3 className="h-4 w-4" /> How this is computed</CardTitle></CardHeader>
             <CardContent className="text-sm text-muted-foreground">
-              Net = interest booked on loans disbursed in the period + penalty collected − expenses − salaries.
+              Net = interest booked on loans disbursed in the period + penalty collected − expenses − borrowed-loan interest − salaries.
               Collections and disbursements move cash but are principal flows, not profit.
             </CardContent>
           </Card>

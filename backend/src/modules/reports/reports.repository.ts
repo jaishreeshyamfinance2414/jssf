@@ -14,6 +14,7 @@ export const reportsRepository = {
       disbursed: string;
       interest_booked: string;
       expenses: string;
+      borrowed_interest: string;
       salaries: string;
       capital_in: string;
     }>(
@@ -28,6 +29,8 @@ export const reportsRepository = {
                     WHERE disbursed_at::date BETWEEN $1 AND $2), 0)::text AS interest_booked,
          COALESCE((SELECT sum(amount) FROM expenses
                     WHERE expense_date BETWEEN $1 AND $2), 0)::text AS expenses,
+         COALESCE((SELECT sum(interest_amount) FROM borrowed_loan_payments
+                    WHERE payment_date BETWEEN $1 AND $2), 0)::text AS borrowed_interest,
          COALESCE((SELECT sum(final_salary) FROM salaries
                     WHERE paid_at::date BETWEEN $1 AND $2), 0)::text AS salaries,
          COALESCE((SELECT sum(amount) FROM capital_entries
@@ -41,6 +44,7 @@ export const reportsRepository = {
       disbursed: Number(r.disbursed),
       interestBooked: Number(r.interest_booked),
       expenses: Number(r.expenses),
+      borrowedInterest: Number(r.borrowed_interest),
       salaries: Number(r.salaries),
       capitalIn: Number(r.capital_in),
     };

@@ -220,11 +220,88 @@ export const dashboardRepository = {
 
   async totalExpenses(): Promise<number> {
     const { rows } = await query<{ s: string }>(
-      `SELECT COALESCE(sum(amount),0)::text AS s
-         FROM expenses
-        WHERE date_trunc('month', expense_date) = date_trunc('month', CURRENT_DATE)`,
+      `SELECT (
+         COALESCE((SELECT sum(amount) FROM expenses
+                    WHERE date_trunc('month', expense_date) = date_trunc('month', CURRENT_DATE)),0) +
+         COALESCE((SELECT sum(interest_amount) FROM borrowed_loan_payments
+                    WHERE date_trunc('month', payment_date) = date_trunc('month', CURRENT_DATE)),0)
+       )::text AS s`,
     );
     return Number(rows[0].s);
+  },
+
+  async borrowedLoanSummary(): Promise<{
+    originalBorrowed: number; outstandingPrincipal: number; principalRepaid: number;
+    interestPaid: number; overduePayments: number;
+  }> {
+    const { rows } = await query<{
+      original: string; outstanding: string; principal_paid: string; interest_paid: string; overdue: string;
+    }>(
+      `SELECT COALESCE(sum(bl.original_principal),0)::text original,
+              COALESCE(sum(GREATEST(bl.original_principal-COALESCE(p.principal_paid,0),0)),0)::text outstanding,
+              COALESCE(sum(COALESCE(p.principal_paid,0)),0)::text principal_paid,
+              COALESCE(sum(COALESCE(p.interest_paid,0)),0)::text interest_paid,
+              COALESCE(sum(CASE WHEN bl.status='closed' THEN 0
+                                WHEN bl.loan_type='reducing_balance' THEN COALESCE(s.overdue,0)
+                                WHEN CURRENT_DATE <= bl.first_payment_date THEN 0
+                                ELSE GREATEST(0,COALESCE(io.due_count,0)-COALESCE(p.payment_count,0)::int)
+                           END),0)::text overdue
+         FROM borrowed_loans bl
+         LEFT JOIN LATERAL (
+           SELECT sum(principal_amount) principal_paid,sum(interest_amount) interest_paid,count(*) payment_count
+             FROM borrowed_loan_payments WHERE loan_id=bl.id
+         ) p ON true
+         LEFT JOIN LATERAL (
+           SELECT count(*)::int due_count FROM generate_series(0,1200) n
+            WHERE (bl.first_payment_date + (n * interval '1 month'))::date < CURRENT_DATE
+         ) io ON bl.loan_type='interest_only'
+         LEFT JOIN LATERAL (
+           SELECT count(*) overdue FROM borrowed_loan_schedule
+            WHERE loan_id=bl.id AND paid_at IS NULL AND due_date<CURRENT_DATE
+         ) s ON true`,
+    );
+    return {
+      originalBorrowed: Number(rows[0].original),
+      outstandingPrincipal: Number(rows[0].outstanding),
+      principalRepaid: Number(rows[0].principal_paid),
+      interestPaid: Number(rows[0].interest_paid),
+      overduePayments: Number(rows[0].overdue),
+    };
+  },
+
+  async borrowedLoanReminders(): Promise<Array<{
+    loanId: string; lenderName: string; loanType: string; paymentDate: string; amount: number; overdue: boolean;
+  }>> {
+    const { rows } = await query<{
+      id: string; lender_name: string; loan_type: string; payment_date: string; amount: string;
+    }>(
+      `SELECT bl.id,bl.lender_name,bl.loan_type,
+              CASE WHEN bl.loan_type='reducing_balance' THEN ns.due_date
+                   ELSE (bl.first_payment_date + (COALESCE(p.payment_count,0)::int * interval '1 month'))::date
+               END::text payment_date,
+              CASE WHEN bl.loan_type='reducing_balance' THEN ns.total_due ELSE bl.periodic_interest END::text amount
+         FROM borrowed_loans bl
+         LEFT JOIN LATERAL (
+           SELECT count(*) payment_count FROM borrowed_loan_payments WHERE loan_id=bl.id
+         ) p ON true
+         LEFT JOIN LATERAL (
+           SELECT due_date,total_due FROM borrowed_loan_schedule
+            WHERE loan_id=bl.id AND paid_at IS NULL ORDER BY installment_no LIMIT 1
+         ) ns ON true
+        WHERE bl.status='active'
+          AND (bl.loan_type='interest_only' OR ns.due_date IS NOT NULL)
+        ORDER BY payment_date
+        LIMIT 8`,
+    );
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+    return rows.map((row) => ({
+      loanId: row.id,
+      lenderName: row.lender_name,
+      loanType: row.loan_type,
+      paymentDate: row.payment_date,
+      amount: Number(row.amount),
+      overdue: row.payment_date < today,
+    }));
   },
 
   async areaWiseCollection(): Promise<Array<{ area: string; amount: number }>> {

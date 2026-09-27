@@ -49,4 +49,19 @@ export interface DashboardData {
     createdAt: string;
   }>;
   pendingHandoverByAgent?: Array<{ agentId: string; agentName: string; pendingAmount: number; dueAmount: number }>;
+  borrowedLoans?: {
+    originalBorrowed: number;
+    outstandingPrincipal: number;
+    principalRepaid: number;
+    interestPaid: number;
+    overduePayments: number;
+  };
+  borrowedLoanReminders?: Array<{
+    loanId: string;
+    lenderName: string;
+    loanType: string;
+    paymentDate: string;
+    amount: number;
+    overdue: boolean;
+  }>;
 }

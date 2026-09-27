@@ -25,6 +25,8 @@ interface Txn {
 const SOURCE_LABEL: Record<string, string> = {
   capital: 'Capital Introduced',
   capital_withdrawal: 'Capital Withdrawn',
+  borrowed_loan: 'Borrowed Loan Received',
+  borrowed_loan_payment: 'Borrowed Loan Payment',
   collection: 'Collection Received',
   agent_submission: 'Agent Cash Submission',
   loan_disbursement: 'Loan Disbursed',

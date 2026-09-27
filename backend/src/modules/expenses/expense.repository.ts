@@ -10,11 +10,25 @@ export const expenseRepository = {
 
   async list() {
     const { rows } = await query(
-      `SELECT e.*, ec.name AS category_name, u.full_name AS created_by_name
-         FROM expenses e
-         LEFT JOIN expense_categories ec ON ec.id = e.category_id
-         LEFT JOIN users u ON u.id = e.created_by
-        ORDER BY e.expense_date DESC, e.created_at DESC
+      `SELECT * FROM (
+         SELECT e.id, ec.name AS category_name, e.amount::text, e.mode::text,
+                e.expense_date, e.description, u.full_name AS created_by_name, e.created_at
+           FROM expenses e
+           LEFT JOIN expense_categories ec ON ec.id = e.category_id
+           LEFT JOIN users u ON u.id = e.created_by
+         UNION ALL
+         SELECT p.id, 'Borrowed Loan Interest' AS category_name, p.interest_amount::text,
+                CASE WHEN a.type='cash' THEN 'cash' ELSE 'bank_transfer' END AS mode,
+                p.payment_date AS expense_date,
+                ('Interest paid to ' || bl.lender_name) AS description,
+                u.full_name AS created_by_name, p.created_at
+           FROM borrowed_loan_payments p
+           JOIN borrowed_loans bl ON bl.id=p.loan_id
+           JOIN accounts a ON a.id=p.account_id
+           LEFT JOIN users u ON u.id=p.created_by
+          WHERE p.interest_amount > 0
+       ) expense_rows
+        ORDER BY expense_date DESC, created_at DESC
         LIMIT 300`,
     );
     return rows;

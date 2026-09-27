@@ -17,6 +17,7 @@ const TITLES: Record<string, string> = {
   '/collection-sheet': 'Collection Sheet',
   '/areas': 'Areas',
   '/capital': 'Capital',
+  '/borrowed-loans': 'Borrowed Loans',
   '/accounts': 'Cash & Bank',
   '/expenses': 'Expenses',
   '/salary': 'Salary',

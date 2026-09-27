@@ -84,10 +84,14 @@ export const dashboardController = {
     };
 
     if (ADMIN_LIKE.includes(req.user!.role)) {
-      const [byAgent, dueByAgent] = await Promise.all([al.pendingByAgent(), al.lifetimeDueByAgent()]);
+      const [byAgent, dueByAgent, borrowedLoans, borrowedLoanReminders] = await Promise.all([
+        al.pendingByAgent(), al.lifetimeDueByAgent(), r.borrowedLoanSummary(), r.borrowedLoanReminders(),
+      ]);
       const dueMap = new Map(dueByAgent.map((d) => [d.agentId, d.dueAmount]));
       return ok(res, {
         ...base,
+        borrowedLoans,
+        borrowedLoanReminders,
         pendingHandoverByAgent: byAgent.map((a) => ({ ...a, dueAmount: dueMap.get(a.agentId) ?? 0 })),
       });
     }

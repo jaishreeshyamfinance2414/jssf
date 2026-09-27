@@ -20,6 +20,7 @@ import {
   Settings,
   ScrollText,
   LogOut,
+  Landmark,
 } from 'lucide-react';
 import { Logo } from '@/components/logo';
 import { cn } from '@/lib/utils';
@@ -62,6 +63,7 @@ const SECTIONS: NavSection[] = [
     items: [
       { label: 'Areas', href: '/areas', icon: MapPin, permission: 'area.view' },
       { label: 'Capital', href: '/capital', icon: CircleDollarSign, permission: 'capital.view' },
+      { label: 'Borrowed Loans', href: '/borrowed-loans', icon: Landmark, roles: ['admin', 'manager'] },
       { label: 'Cash & Bank', href: '/accounts', icon: Wallet, permission: 'capital.view' },
       { label: 'Expenses', href: '/expenses', icon: Receipt, permission: 'expense.view' },
       { label: 'Salary', href: '/salary', icon: Wallet, permission: 'salary.view' },

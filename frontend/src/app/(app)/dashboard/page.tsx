@@ -13,6 +13,7 @@ import { AreaCollection } from '@/components/dashboard/area-collection';
 import { PendingApprovals } from '@/components/dashboard/pending-approvals';
 import { RecentActivity } from '@/components/dashboard/recent-activity';
 import { HandoverCard } from '@/components/dashboard/handover-card';
+import { BorrowedLoansCard } from '@/components/dashboard/borrowed-loans-card';
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -46,6 +47,10 @@ export default function DashboardPage() {
 
       {/* KPI strip */}
       <KpiStrip kpis={data.kpis} />
+
+      {isAdminLike && data.borrowedLoans && (
+        <BorrowedLoansCard summary={data.borrowedLoans} reminders={data.borrowedLoanReminders ?? []} />
+      )}
 
       {/* Trend + agent reconciliation */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.6fr_1fr]">

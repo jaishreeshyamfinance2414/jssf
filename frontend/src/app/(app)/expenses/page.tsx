@@ -68,7 +68,7 @@ export default function ExpensesPage() {
   });
 
   return (
-    <PageShell title="Expenses" description="Enter business expenses and debit them from cash or UPI/Bank balance.">
+    <PageShell title="Expenses" description="Business expenses, including interest paid on borrowed loans, deducted from cash or bank balance.">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Receipt className="h-4 w-4" /> Add Expense</CardTitle>
