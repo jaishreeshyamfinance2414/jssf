@@ -385,7 +385,7 @@ export async function downloadCompleteCustomerPdf(customer: CompleteCustomerData
     );
   }
 
-  const blob = new Blob([bytes], { type: 'application/pdf' });
+  const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   const parts = [customer.full_name, customer.mobile, customer.alt_mobile].filter(Boolean).map((part) => safeFilePart(String(part)));
