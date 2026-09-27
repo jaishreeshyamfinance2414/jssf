@@ -56,7 +56,6 @@ interface LoanDetail {
     penalty: string;
     type: string;
     mode: string;
-    collected_at: string;
     entry_date: string;
     timing: 'advance' | 'missed' | 'delayed' | 'on_time';
     agent_name: string | null;
@@ -74,6 +73,12 @@ interface LoanDetail {
 type HistoryCollection = LoanDetail['collections'][number];
 
 const TYPE_LABEL: Record<string, string> = { full: 'Full', partial: 'Partial', advance: 'Advance', missed: 'Missed' };
+const INDIA_OFFSET = '+05:30';
+
+const indiaTimestampToLocal = (value: string) =>
+  new Date(new Date(value).getTime() + 330 * 60 * 1000).toISOString().slice(0, 19);
+
+const indiaLocalToIso = (value: string) => new Date(`${value}${INDIA_OFFSET}`).toISOString();
 
 const SORT_OPTIONS = [
   { value: 'latest', label: 'Latest First' },
@@ -249,7 +254,7 @@ export default function LoansPage() {
     },
   });
   const [editingCollection, setEditingCollection] = useState<HistoryCollection | null>(null);
-  const [collectionForm, setCollectionForm] = useState({ amount: '', penalty: '', type: 'full', collectedDate: '' });
+  const [collectionForm, setCollectionForm] = useState({ amount: '', penalty: '', type: 'full', entryDate: '' });
   const updateCollection = useMutation({
     mutationFn: (input: { id: string; body: Record<string, unknown> }) => apiPut(`/collections/${input.id}`, input.body),
     onSuccess: () => {
@@ -272,7 +277,7 @@ export default function LoansPage() {
       amount: String(Number(c.amount)),
       penalty: String(Number(c.penalty)),
       type: c.type,
-      collectedDate: c.entry_date,
+      entryDate: indiaTimestampToLocal(c.entry_date),
     });
   };
   const startEdit = (loan: Loan) => {
@@ -538,16 +543,16 @@ export default function LoansPage() {
                 {editingCollection && (
                   <div className="rounded-md border bg-muted/30 p-3">
                     <div className="mb-2 text-sm font-semibold">
-                      Edit Entry — {dateTime(editingCollection.collected_at)}
+                      Edit Entry — {dateTime(editingCollection.entry_date)}
                     </div>
                     <form
                       className="grid gap-3 md:grid-cols-5"
                       onSubmit={(e) => {
                         e.preventDefault();
                         const body: Record<string, unknown> = {
-                          collectedDate: collectionForm.collectedDate,
                           type: collectionForm.type,
                         };
+                        if (user?.role === 'admin') body.entryDate = indiaLocalToIso(collectionForm.entryDate);
                         if (collectionForm.type !== 'missed') {
                           body.amount = Number(collectionForm.amount);
                           body.penalty = Number(collectionForm.penalty || 0);
@@ -594,9 +599,11 @@ export default function LoansPage() {
                         disabled={collectionForm.type === 'missed'}
                       />
                       <Input
-                        type="date"
-                        value={collectionForm.collectedDate}
-                        onChange={(e) => setCollectionForm({ ...collectionForm, collectedDate: e.target.value })}
+                        type="datetime-local"
+                        step="1"
+                        value={collectionForm.entryDate}
+                        onChange={(e) => setCollectionForm({ ...collectionForm, entryDate: e.target.value })}
+                        disabled={user?.role !== 'admin'}
                         required
                       />
                       <div className="flex gap-2">
@@ -612,7 +619,7 @@ export default function LoansPage() {
                     const isCoverageMarker = isAdvanceCoverageMarker(c);
                     const canModifyCoverageMarker = !isCoverageMarker || user?.role === 'admin';
                     return [
-                      dateTime(c.collected_at),
+                      dateTime(c.entry_date),
                       c.statement_no,
                       c.due_date ? date(c.due_date) : '-',
                       money(c.amount),
@@ -752,7 +759,9 @@ function buildPaymentSummary(detail: LoanDetail) {
   const paid = Number(detail.loan.received_till_today);
   const remaining = Number(detail.loan.remaining);
   const penalty = Number(detail.loan.total_penalty);
-  const entries = detail.collections.filter(c => c.entry_date <= detail.loan.business_date);
+  const entries = detail.collections.filter(
+    c => indiaTimestampToLocal(c.entry_date).slice(0, 10) <= detail.loan.business_date,
+  );
   const missed = entries.filter(c => c.timing === 'missed').length;
   const advance = entries.filter(c => c.timing === 'advance').length;
   const onTime = entries.filter(c => c.timing === 'on_time').length;

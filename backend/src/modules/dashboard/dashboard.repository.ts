@@ -23,11 +23,11 @@ export const dashboardRepository = {
   async todaysCollection(): Promise<{ cash: number; digital: number; total: number; previousTotal: number }> {
     const { rows } = await query<{ cash: string; digital: string; prev: string }>(
       `SELECT
-         COALESCE(sum(amount) FILTER (WHERE mode = 'cash' AND collected_at::date = CURRENT_DATE), 0)::text AS cash,
-         COALESCE(sum(amount) FILTER (WHERE mode != 'cash' AND collected_at::date = CURRENT_DATE), 0)::text AS digital,
-         COALESCE(sum(amount) FILTER (WHERE collected_at::date = CURRENT_DATE - 1), 0)::text AS prev
+         COALESCE(sum(amount) FILTER (WHERE mode = 'cash' AND (entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date), 0)::text AS cash,
+         COALESCE(sum(amount) FILTER (WHERE mode != 'cash' AND (entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date), 0)::text AS digital,
+         COALESCE(sum(amount) FILTER (WHERE (entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date - 1), 0)::text AS prev
          FROM collections
-        WHERE collected_at::date IN (CURRENT_DATE, CURRENT_DATE - 1)`,
+        WHERE (entry_date AT TIME ZONE 'Asia/Kolkata')::date IN ((now() AT TIME ZONE 'Asia/Kolkata')::date, (now() AT TIME ZONE 'Asia/Kolkata')::date - 1)`,
     );
     const cash = Number(rows[0].cash);
     const digital = Number(rows[0].digital);
@@ -311,7 +311,7 @@ export const dashboardRepository = {
          JOIN loans l ON l.id = c.loan_id
          JOIN customers cu ON cu.id = l.customer_id
          LEFT JOIN areas a ON a.id = COALESCE(c.area_id, cu.area_id)
-        WHERE c.collected_at::date = CURRENT_DATE
+        WHERE (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date
         GROUP BY a.name ORDER BY sum(c.amount) DESC`,
     );
     return rows.map((r) => ({ area: r.area, amount: Number(r.amount) }));
@@ -331,13 +331,13 @@ export const dashboardRepository = {
               COALESCE(u.full_name,'Unassigned') AS agent,
               (SELECT a.name FROM areas a
                 WHERE a.id = (SELECT area_id FROM collections c2
-                               WHERE c2.agent_id = c.agent_id AND c2.collected_at::date = CURRENT_DATE
+                               WHERE c2.agent_id = c.agent_id AND (c2.entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date
                                GROUP BY area_id ORDER BY sum(amount) DESC LIMIT 1)) AS area,
               sum(c.amount)::text AS amount,
               COALESCE((SELECT sum(short_amount) FROM agent_ledger al
                          WHERE al.agent_id = c.agent_id AND al.ledger_date = CURRENT_DATE), 0)::text AS short_amount
          FROM collections c LEFT JOIN users u ON u.id = c.agent_id
-        WHERE c.collected_at::date = CURRENT_DATE
+        WHERE (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date
         GROUP BY c.agent_id, u.full_name
         ORDER BY sum(c.amount) DESC`,
     );
@@ -355,7 +355,7 @@ export const dashboardRepository = {
     const { rows } = await query<{ date: string; amount: string; due: string }>(
       `SELECT d::date::text AS date,
               COALESCE((SELECT sum(amount) FROM collections
-                         WHERE collected_at::date = d::date),0)::text AS amount,
+                         WHERE (entry_date AT TIME ZONE 'Asia/Kolkata')::date = d::date),0)::text AS amount,
               COALESCE((SELECT sum(due_amount) FROM emi_schedule
                          WHERE due_date = d::date),0)::text AS due
          FROM generate_series(CURRENT_DATE - INTERVAL '29 days', CURRENT_DATE, '1 day') d

@@ -4,5 +4,5 @@
 CREATE INDEX IF NOT EXISTS idx_collections_emi_id
   ON collections(emi_id);
 
-CREATE INDEX IF NOT EXISTS idx_collections_loan_collected_at
-  ON collections(loan_id, collected_at);
+CREATE INDEX IF NOT EXISTS idx_collections_loan_entry_date
+  ON collections(loan_id, entry_date);

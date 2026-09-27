@@ -20,9 +20,9 @@ export const reportsRepository = {
     }>(
       `SELECT
          COALESCE((SELECT sum(amount) FROM collections
-                    WHERE collected_at::date BETWEEN $1 AND $2), 0)::text AS collected,
+                    WHERE (entry_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $1 AND $2), 0)::text AS collected,
          COALESCE((SELECT sum(penalty) FROM collections
-                    WHERE collected_at::date BETWEEN $1 AND $2), 0)::text AS penalty_income,
+                    WHERE (entry_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $1 AND $2), 0)::text AS penalty_income,
          COALESCE((SELECT sum(principal) FROM loans
                     WHERE disbursed_at::date BETWEEN $1 AND $2), 0)::text AS disbursed,
          COALESCE((SELECT sum(interest_amount) FROM loans
@@ -53,7 +53,7 @@ export const reportsRepository = {
   /** Day-by-day collection detail: cash vs digital, penalty, entry count. */
   async dailyCollection(from: string, to: string) {
     const { rows } = await query(
-      `SELECT c.collected_at::date::text AS date,
+      `SELECT (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date::text AS date,
               count(*) FILTER (WHERE c.type != 'missed') AS entries,
               count(*) FILTER (WHERE c.type = 'missed') AS missed_entries,
               COALESCE(sum(c.amount) FILTER (WHERE c.mode = 'cash'), 0)::text AS cash,
@@ -61,9 +61,9 @@ export const reportsRepository = {
               COALESCE(sum(c.penalty), 0)::text AS penalty,
               COALESCE(sum(c.amount), 0)::text AS total
          FROM collections c
-        WHERE c.collected_at::date BETWEEN $1 AND $2
-        GROUP BY c.collected_at::date
-        ORDER BY c.collected_at::date DESC`,
+        WHERE (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $1 AND $2
+        GROUP BY (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date
+        ORDER BY (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date DESC`,
       [from, to],
     );
     return rows;
@@ -110,7 +110,7 @@ export const reportsRepository = {
       [customerId],
     );
     const { rows: entries } = await query(
-      `SELECT co.collected_at, l.loan_number, co.amount::text, co.penalty::text,
+      `SELECT co.entry_date, l.loan_number, co.amount::text, co.penalty::text,
               co.type, co.mode,
               COALESCE(agent.full_name, creator.full_name, 'Automatic') AS agent_name
          FROM collections co
@@ -118,7 +118,7 @@ export const reportsRepository = {
          LEFT JOIN users agent ON agent.id = co.agent_id
          LEFT JOIN users creator ON creator.id = co.created_by
         WHERE l.customer_id = $1
-        ORDER BY co.collected_at DESC
+        ORDER BY co.entry_date DESC
         LIMIT 500`,
       [customerId],
     );
@@ -139,7 +139,7 @@ export const reportsRepository = {
                          WHERE al.agent_id = u.id AND al.ledger_date BETWEEN $1 AND $2), 0)::text AS short_amount
          FROM collections c
          JOIN users u ON u.id = c.agent_id
-        WHERE c.collected_at::date BETWEEN $1 AND $2
+        WHERE (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $1 AND $2
         GROUP BY u.id, u.full_name
         ORDER BY sum(c.amount) DESC`,
       [from, to],
@@ -150,14 +150,20 @@ export const reportsRepository = {
   /** Cash & bank account transactions with running context. */
   async accountLedger(from: string, to: string) {
     const { rows } = await query(
-      `SELECT t.txn_date::text AS date, t.created_at, a.name AS account, a.type AS account_type,
-              t.direction, t.amount::text, t.source, t.description,
-              u.full_name AS created_by
-         FROM account_transactions t
+      `WITH entries AS (
+         SELECT t.*, COALESCE(c.entry_date,
+                  ((t.txn_date::timestamp + (t.created_at AT TIME ZONE 'Asia/Kolkata')::time)
+                    AT TIME ZONE 'Asia/Kolkata')) AS entry_date
+           FROM account_transactions t
+           LEFT JOIN collections c ON t.source = 'collection' AND c.id = t.reference_id
+       )
+       SELECT t.entry_date, t.created_at, a.name AS account, a.type AS account_type,
+              t.direction, t.amount::text, t.source, t.description, u.full_name AS created_by
+         FROM entries t
          JOIN accounts a ON a.id = t.account_id
          LEFT JOIN users u ON u.id = t.created_by
-        WHERE t.txn_date BETWEEN $1 AND $2
-        ORDER BY t.txn_date DESC, t.created_at DESC
+        WHERE (t.entry_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $1 AND $2
+        ORDER BY t.entry_date DESC, t.created_at DESC
         LIMIT 1000`,
       [from, to],
     );

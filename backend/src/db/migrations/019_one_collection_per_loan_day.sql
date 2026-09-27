@@ -12,11 +12,11 @@ BEGIN
   -- possible even when old data already contains duplicates.
   IF TG_OP = 'UPDATE'
      AND NEW.loan_id = OLD.loan_id
-     AND NEW.collected_at = OLD.collected_at THEN
+     AND NEW.entry_date = OLD.entry_date THEN
     RETURN NEW;
   END IF;
 
-  entry_date := NEW.collected_at::date;
+  entry_date := NEW.entry_date::date;
   is_automatic := NEW.amount = 0
     AND NEW.created_by IS NULL
     AND NEW.note IN (
@@ -35,8 +35,8 @@ BEGIN
       FROM collections existing
      WHERE existing.loan_id = NEW.loan_id
        AND existing.id <> NEW.id
-       AND existing.collected_at >= entry_date::timestamp
-       AND existing.collected_at < entry_date::timestamp + interval '1 day'
+       AND existing.entry_date >= entry_date::timestamp
+       AND existing.entry_date < entry_date::timestamp + interval '1 day'
   ) THEN
     -- A concurrent real entry wins over a derived sweep row. Returning NULL
     -- safely skips only that automatic insert without rolling back the sweep.
@@ -54,5 +54,5 @@ $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS trg_one_collection_per_loan_day ON collections;
 CREATE TRIGGER trg_one_collection_per_loan_day
-  BEFORE INSERT OR UPDATE OF loan_id, collected_at ON collections
+  BEFORE INSERT OR UPDATE OF loan_id, entry_date ON collections
   FOR EACH ROW EXECUTE FUNCTION enforce_one_collection_per_loan_day();

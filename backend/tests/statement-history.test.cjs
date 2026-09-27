@@ -27,7 +27,7 @@ test('historical statement coverage, corrections and penalties', async () => {
       VALUES ('HISTORY',$1,20000,120,200,24000,'active',CURRENT_DATE-40) RETURNING id`, [customer])).rows[0].id;
     await db.query(`INSERT INTO emi_schedule(loan_id,installment_no,due_date,due_amount)
       SELECT $1,n,CURRENT_DATE-41+n,200 FROM generate_series(1,120)n`, [loan]);
-    const pay = async (day, amount) => (await db.query(`INSERT INTO collections(loan_id,emi_id,amount,type,mode,collected_at)
+    const pay = async (day, amount) => (await db.query(`INSERT INTO collections(loan_id,emi_id,amount,type,mode,entry_date)
       SELECT loan_id,id,$3,'full','cash',due_date::timestamp+interval '10 hours'
       FROM emi_schedule WHERE loan_id=$1 AND installment_no=$2 RETURNING id`, [loan,day,amount])).rows[0].id;
     const reconcile = async () => {
@@ -35,7 +35,7 @@ test('historical statement coverage, corrections and penalties', async () => {
       await reconcileHistoricalPenalties(loan, db);
     };
     const types = async () => (await db.query(`SELECT e.installment_no,c.type,c.amount,e.missed_penalty
-      FROM emi_schedule e LEFT JOIN collections c ON c.loan_id=e.loan_id AND c.collected_at::date=e.due_date
+      FROM emi_schedule e LEFT JOIN collections c ON c.loan_id=e.loan_id AND c.entry_date::date=e.due_date
       WHERE e.loan_id=$1 AND e.installment_no<=20 ORDER BY e.installment_no`, [loan])).rows;
     const first = await pay(1,2000);
     const later = await pay(15,200);
@@ -71,16 +71,16 @@ test('historical statement coverage, corrections and penalties', async () => {
     await reconcile();
     assert.deepEqual((await types()).slice(0,14), original);
     // Delete/recreate later payment; the old advance boundary stays put.
-    const removedDate = (await db.query('DELETE FROM collections WHERE id=$1 RETURNING collected_at',[later])).rows[0].collected_at;
+    const removedDate = (await db.query('DELETE FROM collections WHERE id=$1 RETURNING entry_date',[later])).rows[0].entry_date;
     await reconcileHistory(loan, db, removedDate);
     assert.equal((await types())[14].type,null, 'Deletion must leave the date free for replacement');
     const replacement = await pay(15,200);
     await reconcile();
     assert.deepEqual((await types()).slice(0,14),original);
     // Move later payment to day 2: receipt dates, not the old EMI anchor, win.
-    await db.query(`DELETE FROM collections WHERE loan_id=$1 AND amount=0 AND collected_at::date=
+    await db.query(`DELETE FROM collections WHERE loan_id=$1 AND amount=0 AND entry_date::date=
       (SELECT due_date FROM emi_schedule WHERE loan_id=$1 AND installment_no=2)`,[loan]);
-    await db.query(`UPDATE collections SET collected_at=(SELECT due_date::timestamp+interval '10 hours'
+    await db.query(`UPDATE collections SET entry_date=(SELECT due_date::timestamp+interval '10 hours'
       FROM emi_schedule WHERE loan_id=$1 AND installment_no=2) WHERE id=$2`,[loan,replacement]);
     await reconcile();
     rows = await types();
@@ -99,21 +99,21 @@ test('historical statement coverage, corrections and penalties', async () => {
     await reconcile();
     assert.deepEqual(await types(),snapshot);
     assert.equal((await db.query(`SELECT count(*)::int AS n FROM (
-      SELECT collected_at::date FROM collections WHERE loan_id=$1
-      GROUP BY collected_at::date HAVING count(*)>1) d`,[loan])).rows[0].n,0);
+      SELECT entry_date::date FROM collections WHERE loan_id=$1
+      GROUP BY entry_date::date HAVING count(*)>1) d`,[loan])).rows[0].n,0);
     assert.equal((await db.query(`SELECT count(*)::int AS n FROM collections
-      WHERE loan_id=$1 AND amount=0 AND collected_at::date>=CURRENT_DATE`,[loan])).rows[0].n,0);
+      WHERE loan_id=$1 AND amount=0 AND entry_date::date>=CURRENT_DATE`,[loan])).rows[0].n,0);
 
     const second = (await db.query(`INSERT INTO loans(loan_number,customer_id,principal,duration_days,emi_amount,total_payable,status,loan_date)
       VALUES ('HISTORY-100',$1,10000,120,100,12000,'active',CURRENT_DATE-40) RETURNING id`,[customer])).rows[0].id;
     await db.query(`INSERT INTO emi_schedule(loan_id,installment_no,due_date,due_amount)
       SELECT $1,n,CURRENT_DATE-41+n,100 FROM generate_series(1,120)n`,[second]);
-    await db.query(`INSERT INTO collections(loan_id,amount,type,mode,collected_at)
+    await db.query(`INSERT INTO collections(loan_id,amount,type,mode,entry_date)
       VALUES ($1,100,'full','cash',(CURRENT_DATE-40)::timestamp+interval '10 hours'),
              ($1,2000,'advance','cash',(CURRENT_DATE-39)::timestamp+interval '10 hours')`,[second]);
     await reconcileHistory(second,db);
     const boundary = (await db.query(`SELECT e.installment_no,c.type FROM emi_schedule e
-      JOIN collections c ON c.loan_id=e.loan_id AND c.collected_at::date=e.due_date
+      JOIN collections c ON c.loan_id=e.loan_id AND c.entry_date::date=e.due_date
       WHERE e.loan_id=$1 AND e.installment_no IN (3,20,21,22) ORDER BY e.installment_no`,[second])).rows;
     assert.deepEqual(boundary.map(r=>r.type),['advance','advance','full','missed']);
 
@@ -123,7 +123,7 @@ test('historical statement coverage, corrections and penalties', async () => {
       VALUES ('PENALTY-BOUNDARY',$1,20000,120,200,24000,'active',CURRENT_DATE-3) RETURNING id`,[customer])).rows[0].id;
     await db.query(`INSERT INTO emi_schedule(loan_id,installment_no,due_date,due_amount)
       SELECT $1,n,CURRENT_DATE-4+n,200 FROM generate_series(1,120)n`,[threshold]);
-    const receipt = (await db.query(`INSERT INTO collections(loan_id,amount,penalty,type,mode,collected_at)
+    const receipt = (await db.query(`INSERT INTO collections(loan_id,amount,penalty,type,mode,entry_date)
       VALUES ($1,200,0,'full','cash',CURRENT_DATE::timestamp+interval '1 minute') RETURNING id`,[threshold])).rows[0].id;
     const penaltyToday = async () => Number((await db.query(`SELECT missed_penalty FROM emi_schedule
       WHERE loan_id=$1 AND due_date=CURRENT_DATE`,[threshold])).rows[0].missed_penalty);
@@ -151,7 +151,7 @@ test('historical statement coverage, corrections and penalties', async () => {
       VALUES ('COMPLETED-BOUNDARY',$1,20000,120,200,24000,'active',CURRENT_DATE-4) RETURNING id`,[customer])).rows[0].id;
     await db.query(`INSERT INTO emi_schedule(loan_id,installment_no,due_date,due_amount)
       SELECT $1,n,CURRENT_DATE-5+n,200 FROM generate_series(1,120)n`,[completedBoundary]);
-    const completedReceipt = (await db.query(`INSERT INTO collections(loan_id,amount,type,mode,collected_at)
+    const completedReceipt = (await db.query(`INSERT INTO collections(loan_id,amount,type,mode,entry_date)
       VALUES ($1,200,'full','cash',(CURRENT_DATE-1)::timestamp+interval '23 hours 59 minutes') RETURNING id`,[completedBoundary])).rows[0].id;
     for (const [amount, expected] of [[200,0],[200.01,0],[199.99,200],[199,200],[100,200],[800,0],[1000,0]]) {
       await db.query('UPDATE collections SET amount=$2 WHERE id=$1',[completedReceipt,amount]);
@@ -255,7 +255,7 @@ test('historical statement coverage, corrections and penalties', async () => {
         VALUES ($1,'debit',50000,'loan_disbursement',$2,CURRENT_DATE-2)`,[cashAccount,swapLoan]);
       await db.query(`INSERT INTO emi_schedule(loan_id,installment_no,due_date,due_amount)
         SELECT $1,n,CURRENT_DATE-3+n,120 FROM generate_series(1,500)n`,[swapLoan]);
-      await db.query(`INSERT INTO collections(loan_id,emi_id,amount,type,mode,collected_at)
+      await db.query(`INSERT INTO collections(loan_id,emi_id,amount,type,mode,entry_date)
         SELECT $1,id,120,'full','cash',CURRENT_DATE-2+interval '10 hours'
           FROM emi_schedule WHERE loan_id=$1 AND installment_no=1`,[swapLoan]);
       await db.query(`INSERT INTO account_transactions(account_id,direction,amount,source,txn_date)
@@ -284,7 +284,7 @@ test('historical statement coverage, corrections and penalties', async () => {
         /after an existing collection date/);
       assert.equal((await db.query(`SELECT txn_date::text AS day FROM account_transactions
         WHERE source='loan_disbursement' AND reference_id=$1`,[swapLoan])).rows[0].day,correctedDate);
-      const input = {loanId:threshold,amount:200,penalty:0,type:'full',mode:'cash',collectedDate:today};
+      const input = {loanId:threshold,amount:200,penalty:0,type:'full',mode:'cash',entryDate:`${today}T10:00:00+05:30`};
       const entry = await collectionService.record(input,actor,'admin');
       let actual = (await loanRepository.collectionsFor(threshold)).find(r=>r.id===entry.id);
       assert.equal(actual.type,'partial');
@@ -305,7 +305,7 @@ test('historical statement coverage, corrections and penalties', async () => {
       assert.equal(actual.type,'full');
       assert.equal(actual.timing,'delayed','Catching up does not erase prior arrears');
       const earlier = (await loanRepository.collectionsFor(threshold)).filter(r=>r.amount==='0.00').at(-1);
-      await assert.rejects(collectionService.update(entry.id,{collectedDate:earlier.entry_date},actor,'admin'),/already has an entry/);
+      await assert.rejects(collectionService.update(entry.id,{entryDate:earlier.entry_date},actor,'admin'),/already has an entry/);
       await collectionService.remove(entry.id,actor,'admin');
       assert.equal(await penaltyToday(),0);
       assert.equal(Number((await db.query("SELECT count(*) AS n FROM account_transactions WHERE reference_id=$1",[entry.id])).rows[0].n),0);
@@ -344,7 +344,7 @@ test('historical statement coverage, corrections and penalties', async () => {
       actual = (await loanRepository.collectionsFor(threshold)).find(r=>r.id===actual.id);
       assert.equal(actual.type,'missed');
       assert.equal((await db.query(`SELECT count(*)::int AS n FROM (
-        SELECT loan_id,collected_at::date FROM collections GROUP BY loan_id,collected_at::date HAVING count(*)>1
+        SELECT loan_id,entry_date::date FROM collections GROUP BY loan_id,entry_date::date HAVING count(*)>1
       ) duplicates`)).rows[0].n,0);
 
       // Matured contract: four EMIs only, but seven calendar days of checks.
@@ -352,7 +352,7 @@ test('historical statement coverage, corrections and penalties', async () => {
         VALUES ('MATURED',$1,20000,4,200,800,'active',CURRENT_DATE-6) RETURNING id`,[customer])).rows[0].id;
       await db.query(`INSERT INTO emi_schedule(loan_id,installment_no,due_date,due_amount)
         SELECT $1,n,CURRENT_DATE-7+n,200 FROM generate_series(1,4)n`,[maturedLoan]);
-      const afterTermPayment = (await db.query(`INSERT INTO collections(loan_id,amount,type,mode,collected_at)
+      const afterTermPayment = (await db.query(`INSERT INTO collections(loan_id,amount,type,mode,entry_date)
         VALUES ($1,300,'partial','cash',(CURRENT_DATE-2)::timestamp+interval '10 hours') RETURNING id`,[maturedLoan])).rows[0].id;
       await sweepMissedEmis();
       const maturityCharges = async () => (await db.query(`SELECT penalty_date::text,amount FROM loan_daily_penalties
@@ -442,7 +442,7 @@ test('historical statement coverage, corrections and penalties', async () => {
       // reverses later charges. No extra EMI debt survives the correction.
       const prepaid = loadLoans[0].id;
       const firstDay = (await db.query('SELECT loan_date::text AS day FROM loans WHERE id=$1',[prepaid])).rows[0].day;
-      const firstAuto = (await db.query('SELECT id FROM collections WHERE loan_id=$1 AND collected_at::date=$2::date',[prepaid,firstDay])).rows[0].id;
+      const firstAuto = (await db.query('SELECT id FROM collections WHERE loan_id=$1 AND entry_date::date=$2::date',[prepaid,firstDay])).rows[0].id;
       await collectionService.update(firstAuto,{type:'full',amount:24000},actor,'admin');
       assert.equal((await loanRepository.findById(prepaid)).status,'closed');
       assert.equal(Number((await loanRepository.findById(prepaid)).total_payable),24000);
@@ -451,7 +451,7 @@ test('historical statement coverage, corrections and penalties', async () => {
       await sweepMissedEmis();
       assert.equal((await loanRepository.collectionsFor(prepaid)).length,1);
       assert.equal((await db.query(`SELECT count(*)::int AS n FROM (
-        SELECT loan_id,collected_at::date FROM collections GROUP BY loan_id,collected_at::date HAVING count(*)>1
+        SELECT loan_id,entry_date::date FROM collections GROUP BY loan_id,entry_date::date HAVING count(*)>1
       ) duplicates`)).rows[0].n,0);
     } finally {
       await pool.end();

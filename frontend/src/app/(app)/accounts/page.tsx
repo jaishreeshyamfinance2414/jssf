@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Wallet } from 'lucide-react';
 import { apiGet } from '@/lib/api';
-import { date, money } from '@/lib/format';
+import { dateTime, money } from '@/lib/format';
 import { PageShell } from '@/components/app/page-shell';
 import { DataTable } from '@/components/app/data-table';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,7 @@ interface Txn {
   amount: string;
   source: string;
   description: string | null;
-  txn_date: string;
+  entry_date: string;
   created_at: string;
   running_balance: string;
 }
@@ -71,7 +71,7 @@ export default function AccountsPage() {
             <DataTable
               columns={['Transaction Date', 'Description', 'Source', 'Credit', 'Debit', 'Running Balance']}
               rows={txns.map((t) => [
-                date(t.txn_date),
+                dateTime(t.entry_date),
                 t.description || SOURCE_LABEL[t.source] || t.source,
                 SOURCE_LABEL[t.source] ?? t.source,
                 t.direction === 'credit' ? money(t.amount) : '-',

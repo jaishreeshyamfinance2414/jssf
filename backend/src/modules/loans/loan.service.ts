@@ -230,7 +230,8 @@ export const loanService = {
 
       if (loan.status === 'active') {
         const { rows: earlyCollections } = await client.query(
-          `SELECT 1 FROM collections WHERE loan_id = $1 AND collected_at::date < $2::date
+          `SELECT 1 FROM collections WHERE loan_id = $1
+             AND (entry_date AT TIME ZONE 'Asia/Kolkata')::date < $2::date
              AND (amount + penalty > 0 OR created_by IS NOT NULL) LIMIT 1`,
           [id, loanDate],
         );
@@ -287,7 +288,8 @@ export const loanService = {
         );
         if (dateChanged) {
           await client.query(
-            `DELETE FROM collections WHERE loan_id = $1 AND collected_at::date < $2::date
+            `DELETE FROM collections WHERE loan_id = $1
+               AND (entry_date AT TIME ZONE 'Asia/Kolkata')::date < $2::date
                AND amount = 0 AND penalty = 0 AND created_by IS NULL`,
             [id, loanDate],
           );

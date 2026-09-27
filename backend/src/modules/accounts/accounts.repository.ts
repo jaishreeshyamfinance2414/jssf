@@ -88,12 +88,19 @@ export const accountsRepository = {
 
   async transactionsFor(accountId: string) {
     const { rows } = await query(
-      `SELECT *, SUM(CASE WHEN direction='credit' THEN amount ELSE -amount END)
-                 OVER (ORDER BY txn_date, created_at
+      `WITH entries AS (
+         SELECT t.*, COALESCE(c.entry_date,
+                  ((t.txn_date::timestamp + (t.created_at AT TIME ZONE 'Asia/Kolkata')::time)
+                    AT TIME ZONE 'Asia/Kolkata')) AS entry_date
+           FROM account_transactions t
+           LEFT JOIN collections c ON t.source = 'collection' AND c.id = t.reference_id
+          WHERE t.account_id = $1
+       )
+       SELECT *, SUM(CASE WHEN direction='credit' THEN amount ELSE -amount END)
+                 OVER (ORDER BY entry_date, created_at
                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)::text AS running_balance
-         FROM account_transactions
-        WHERE account_id = $1
-        ORDER BY txn_date DESC, created_at DESC
+         FROM entries
+        ORDER BY entry_date DESC, created_at DESC
         LIMIT 200`,
       [accountId],
     );

@@ -71,8 +71,8 @@ export async function sweepMissedEmis(): Promise<{
               'Auto-marked: installment covered by advance payment',
               'Auto-marked: advance coverage completed on time'
             )
-            AND actual.collected_at >= generated.collected_at::date
-            AND actual.collected_at < generated.collected_at::date + interval '1 day'
+            AND (actual.entry_date AT TIME ZONE 'Asia/Kolkata')::date =
+                (generated.entry_date AT TIME ZONE 'Asia/Kolkata')::date
             AND NOT (
               actual.amount = 0
               AND actual.created_by IS NULL
@@ -93,7 +93,7 @@ export async function sweepMissedEmis(): Promise<{
         WHERE l.status = 'active' AND l.closed_by IS NULL
           AND EXISTS (SELECT 1 FROM emi_schedule e WHERE e.loan_id = l.id)
           AND l.total_payable <= COALESCE((SELECT sum(c.amount + c.penalty) FROM collections c
-            WHERE c.loan_id = l.id AND c.collected_at < CURRENT_DATE::timestamp + interval '1 day'),0)`);
+            WHERE c.loan_id = l.id AND c.entry_date <= now()),0)`);
 
       const matured = await client.query(
         `UPDATE emi_schedule SET status = 'paid'

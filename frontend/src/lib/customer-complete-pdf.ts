@@ -60,8 +60,8 @@ interface LoanDetail {
     advance_balance: string; remaining: string; total_penalty: string;
   };
   collections: Array<{
-    id: string; amount: string; penalty: string; type: string; mode: string; collected_at: string;
-    entry_date: string; timing: string; agent_name: string | null; note: string | null;
+    id: string; amount: string; penalty: string; type: string; mode: string; entry_date: string;
+    timing: string; agent_name: string | null; note: string | null;
     statement_no: number;
     installment_no: number | null; due_date: string | null; missed_penalty: string | null;
   }>;
@@ -220,7 +220,7 @@ export function buildCustomerDataPages(customer: CompleteCustomerData, loans: Lo
     });
 
     const statementY = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
-    const entries = [...detail.collections].sort((a, b) => a.entry_date.localeCompare(b.entry_date) || a.collected_at.localeCompare(b.collected_at));
+    const entries = [...detail.collections].sort((a, b) => a.entry_date.localeCompare(b.entry_date));
     autoTable(doc, {
       startY: statementY,
       theme: 'grid',
@@ -228,7 +228,7 @@ export function buildCustomerDataPages(customer: CompleteCustomerData, loans: Lo
       headStyles: { fillColor: [55, 55, 55], textColor: 255 },
       head: [['Collected On', 'EMI', 'Due Date', 'Amount', 'Penalty', 'Type', 'Mode', 'Timing', 'Agent']],
       body: entries.map((entry) => [
-        displayDate(entry.collected_at, true), entry.statement_no, displayDate(entry.due_date),
+        displayDate(entry.entry_date, true), entry.statement_no, displayDate(entry.due_date),
         amount(entry.amount), amount(Number(entry.penalty) + Number(entry.missed_penalty ?? 0)),
         entry.type, Number(entry.amount) + Number(entry.penalty) === 0 ? '-' : entry.mode.replaceAll('_', ' '),
         entry.timing.replaceAll('_', ' '), value(entry.agent_name),
@@ -447,7 +447,7 @@ export async function downloadLoanStatementPdf(loanId: string, customerName: str
     });
 
     const statementY = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
-    const entries = [...detail.collections].sort((a, b) => a.entry_date.localeCompare(b.entry_date) || a.collected_at.localeCompare(b.collected_at));
+    const entries = [...detail.collections].sort((a, b) => a.entry_date.localeCompare(b.entry_date));
     autoTable(doc, {
       startY: statementY,
       theme: 'grid',
@@ -455,7 +455,7 @@ export async function downloadLoanStatementPdf(loanId: string, customerName: str
       headStyles: { fillColor: [55, 55, 55], textColor: 255 },
       head: [['Collected On', 'EMI', 'Due Date', 'Amount', 'Penalty', 'Type', 'Mode', 'Timing', 'Agent']],
       body: entries.map((entry) => [
-        displayDate(entry.collected_at, true), entry.statement_no, displayDate(entry.due_date),
+        displayDate(entry.entry_date, true), entry.statement_no, displayDate(entry.due_date),
         amount(entry.amount), amount(Number(entry.penalty) + Number(entry.missed_penalty ?? 0)),
         entry.type, Number(entry.amount) + Number(entry.penalty) === 0 ? '-' : entry.mode.replaceAll('_', ' '),
         entry.timing.replaceAll('_', ' '), value(entry.agent_name),

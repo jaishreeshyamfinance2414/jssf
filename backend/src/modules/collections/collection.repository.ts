@@ -36,8 +36,8 @@ export const collectionRepository = {
          ON collections(emi_id)`,
     );
     await query(
-      `CREATE INDEX IF NOT EXISTS idx_collections_loan_collected_at
-         ON collections(loan_id, collected_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_collections_loan_entry_date
+         ON collections(loan_id, entry_date)`,
     );
   },
 
@@ -45,7 +45,7 @@ export const collectionRepository = {
   async totalCollectedForLoan(loanId: string, client: PoolClient): Promise<number> {
     const { rows } = await client.query<{ s: string }>(
       `SELECT COALESCE(sum(amount + penalty), 0)::text AS s FROM collections WHERE loan_id = $1
-        AND collected_at < CURRENT_DATE::timestamp + interval '1 day'`,
+        AND entry_date <= now()`,
       [loanId],
     );
     return Number(rows[0].s);
@@ -56,14 +56,14 @@ export const collectionRepository = {
       `SELECT co.*, l.loan_number, c.full_name AS customer_name, c.mobile AS customer_mobile,
               COALESCE(agent.full_name, creator.full_name, 'Automatic') AS agent_name,
               COALESCE((SELECT p.amount FROM loan_daily_penalties p
-                WHERE p.loan_id = co.loan_id AND p.penalty_date = co.collected_at::date
+                WHERE p.loan_id = co.loan_id AND p.penalty_date = (co.entry_date AT TIME ZONE 'Asia/Kolkata')::date
                   AND p.penalty_date < CURRENT_DATE),0) AS missed_penalty
          FROM collections co
          JOIN loans l ON l.id = co.loan_id
          JOIN customers c ON c.id = l.customer_id
          LEFT JOIN users agent ON agent.id = co.agent_id
          LEFT JOIN users creator ON creator.id = co.created_by
-        ORDER BY co.collected_at DESC
+        ORDER BY co.entry_date DESC
         LIMIT 300`,
     );
     return rows;
@@ -94,10 +94,10 @@ export const collectionRepository = {
          ${loanBalanceJoin}
          LEFT JOIN LATERAL (
            SELECT co.type AS today_type, co.mode AS today_mode,
-                  co.amount::text AS today_amount, co.collected_at AS today_at
+                  co.amount::text AS today_amount, co.entry_date AS today_at
              FROM collections co
-            WHERE co.loan_id = l.id AND co.collected_at::date = CURRENT_DATE
-            ORDER BY co.collected_at DESC
+            WHERE co.loan_id = l.id AND (co.entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date
+            ORDER BY co.entry_date DESC
             LIMIT 1
          ) t ON true
         WHERE l.status = 'active'
@@ -117,7 +117,7 @@ export const collectionRepository = {
               count(*) FILTER (WHERE co.type <> 'missed')::int AS entries
          FROM collections co
          JOIN users u ON u.id = co.agent_id
-        WHERE co.collected_at::date = CURRENT_DATE
+        WHERE (co.entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date
         GROUP BY u.id, u.full_name
         ORDER BY sum(co.amount) DESC`,
     );
@@ -146,7 +146,7 @@ export const collectionRepository = {
           AND e.due_date = COALESCE(coverage.next_due_date,dues.closing_date)
           AND e.due_date <= CURRENT_DATE AND balance.shortfall > 0
           AND NOT EXISTS (SELECT 1 FROM collections today WHERE today.loan_id = l.id
-            AND today.collected_at >= CURRENT_DATE AND today.collected_at < CURRENT_DATE + interval '1 day')
+            AND (today.entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date)
         ORDER BY e.due_date ASC
         LIMIT 300`,
     );
@@ -158,7 +158,7 @@ export const collectionRepository = {
     client: PoolClient,
   ) {
     const { rows } = await client.query<{ id: string }>(
-      `INSERT INTO collections(loan_id, emi_id, agent_id, amount, penalty, type, mode, note, created_by, reconciled_at, collected_at)
+      `INSERT INTO collections(loan_id, emi_id, agent_id, amount, penalty, type, mode, note, created_by, reconciled_at, entry_date)
        VALUES (
          $1,$2,$3,$4,$5,$6,$7,$8,$9,
          CASE WHEN $10 THEN now() ELSE NULL END,
@@ -176,7 +176,7 @@ export const collectionRepository = {
         input.note ?? null,
         input.createdBy,
         input.reconciledImmediately ?? false,
-        input.collectedAt ?? null,
+        input.entryDate ?? null,
       ],
     );
     return rows[0];
@@ -195,7 +195,7 @@ export const collectionRepository = {
       `WITH totals AS (
          SELECT COALESCE(sum(amount), 0) AS collected
            FROM collections WHERE loan_id = $1
-             AND collected_at < CURRENT_DATE::timestamp + interval '1 day'
+             AND entry_date <= now()
        ),
        fill AS (
          SELECT id, due_amount, due_date, missed_penalty,
@@ -233,7 +233,7 @@ export const collectionRepository = {
          SELECT l.id AS loan_id, COALESCE(sum(c.amount), 0) AS collected
            FROM loans l
            LEFT JOIN collections c ON c.loan_id = l.id
-             AND c.collected_at < CURRENT_DATE::timestamp + interval '1 day'
+             AND c.entry_date <= now()
           WHERE l.status = 'active'
           GROUP BY l.id
        ),
@@ -297,19 +297,19 @@ export const collectionRepository = {
     // Always lock loan before collection, matching record() and the sweep.
     await client.query(`SELECT l.id FROM loans l JOIN collections c ON c.loan_id = l.id
                          WHERE c.id = $1 FOR UPDATE OF l`, [id]);
-    const { rows } = await client.query(`SELECT *, collected_at::date::text AS entry_date
+    const { rows } = await client.query(`SELECT *
       FROM collections WHERE id = $1 FOR UPDATE`, [id]);
     return rows[0] ?? null;
   },
 
-  /** Admin correction — collectedAt keeps the entry's original time-of-day on a new date. */
+  /** Admin correction of the authoritative collection timestamp and entry values. */
   async updateEntry(
     id: string,
     input: {
       amount: number;
       penalty: number;
       type?: string;
-      collectedAt: string | null;
+      entryDate: string | null;
       takeOwnership?: { actorId: string };
     },
     client: PoolClient,
@@ -318,13 +318,12 @@ export const collectionRepository = {
       `UPDATE collections
           SET amount = $2, penalty = $3,
               type = COALESCE($4::payment_type, type),
-              collected_at = CASE WHEN $5::date IS NULL THEN collected_at
-                                  ELSE ($5::date + collected_at::time)::timestamptz END,
+              entry_date = COALESCE($5::timestamptz, entry_date),
               agent_id = CASE WHEN $6::uuid IS NULL THEN agent_id ELSE $6::uuid END,
               created_by = CASE WHEN $6::uuid IS NULL THEN created_by ELSE $6::uuid END,
               note = CASE WHEN $6::uuid IS NULL THEN note ELSE NULL END
          WHERE id = $1`,
-      [id, input.amount, input.penalty, input.type ?? null, input.collectedAt, input.takeOwnership?.actorId ?? null],
+      [id, input.amount, input.penalty, input.type ?? null, input.entryDate, input.takeOwnership?.actorId ?? null],
     );
   },
 

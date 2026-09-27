@@ -23,14 +23,14 @@ interface DailyRow { date: string; entries: string; missed_entries: string; cash
 interface MissedRow { loan_number: string; customer_name: string; mobile: string; area: string; missed_count: string; oldest_due: string; overdue_amount: string; penalty: string; loan_remaining: string }
 interface AgentRow { agent_id: string; agent: string; entries: string; loans_touched: string; missed_marked: string; cash: string; digital: string; total: string; short_amount: string }
 interface AccountLedger {
-  transactions: Array<{ date: string; created_at: string; account: string; account_type: string; direction: string; amount: string; source: string; description: string | null; created_by: string | null }>;
+  transactions: Array<{ entry_date: string; created_at: string; account: string; account_type: string; direction: string; amount: string; source: string; description: string | null; created_by: string | null }>;
   balances: Array<{ name: string; type: string; balance: string }>;
 }
 interface CustomerLite { id: string; file_number: number; full_name: string; mobile: string }
 interface CustomerLedger {
   customer: { id: string; file_number: number; full_name: string; mobile: string; area: string } | null;
   loans: Array<{ id: string; loan_number: string; principal: string; total_payable: string; status: string; loan_date: string; emi_amount: string; emi_frequency: string; tenure_count: number; paid: string; remaining: string }>;
-  entries: Array<{ collected_at: string; loan_number: string; amount: string; penalty: string; type: string; mode: string; agent_name: string | null }>;
+  entries: Array<{ entry_date: string; loan_number: string; amount: string; penalty: string; type: string; mode: string; agent_name: string | null }>;
 }
 
 const TABS = [
@@ -156,7 +156,7 @@ export default function ReportsPage() {
         ['Date & Time', 'Loan', 'Amount', 'Penalty', 'Type', 'Mode', 'Agent'],
         ledger.entries
           .filter((e) => !statementLoan || e.loan_number === statementLoan)
-          .map((e) => [dateTime(e.collected_at), e.loan_number, e.amount, e.penalty, e.type, e.mode, e.agent_name ?? '']));
+          .map((e) => [dateTime(e.entry_date), e.loan_number, e.amount, e.penalty, e.type, e.mode, e.agent_name ?? '']));
     } else if (tab === 'agent-performance') {
       exportCsv(`agent-performance_${stamp}.csv`,
         ['Agent', 'Entries', 'Loans Touched', 'Missed Marked', 'Cash', 'UPI/Bank', 'Total', 'Shortage'],
@@ -164,7 +164,7 @@ export default function ReportsPage() {
     } else if (tab === 'account-ledger' && accounts) {
       exportCsv(`account-ledger_${stamp}.csv`,
         ['Date', 'Account', 'Type', 'Direction', 'Amount', 'Source', 'Description', 'By'],
-        accounts.transactions.map((t) => [t.date, t.account, t.account_type, t.direction, t.amount, SOURCE_LABEL[t.source] ?? t.source, t.description ?? '', t.created_by ?? '']));
+        accounts.transactions.map((t) => [t.entry_date, t.account, t.account_type, t.direction, t.amount, SOURCE_LABEL[t.source] ?? t.source, t.description ?? '', t.created_by ?? '']));
     }
   };
 
@@ -329,7 +329,7 @@ export default function ReportsPage() {
             rows={ledger.entries
               .filter((e) => !statementLoan || e.loan_number === statementLoan)
               .map((e, i) => [
-                dateTime(e.collected_at),
+                dateTime(e.entry_date),
                 e.loan_number,
                 money(e.amount),
                 money(e.penalty),
@@ -371,7 +371,7 @@ export default function ReportsPage() {
           <DataTable
             columns={['Date', 'Account', 'Direction', 'Amount', 'Source', 'Description', 'By']}
             rows={accounts.transactions.map((t, i) => [
-              date(t.date),
+              dateTime(t.entry_date),
               `${t.account} (${t.account_type === 'cash' ? 'Cash' : 'Bank'})`,
               t.direction === 'credit'
                 ? <span key={i} className="font-medium text-success">Credit</span>

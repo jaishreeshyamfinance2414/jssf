@@ -6,7 +6,7 @@ export const loanBalanceJoin = `
  LEFT JOIN LATERAL (
    SELECT COALESCE(sum(c.amount + c.penalty),0) AS received
      FROM collections c WHERE c.loan_id = l.id
-      AND c.collected_at < CURRENT_DATE::timestamp + interval '1 day'
+      AND c.entry_date <= now()
  ) receipts ON true
  LEFT JOIN LATERAL (
    SELECT COALESCE(sum(p.amount),0) AS total,

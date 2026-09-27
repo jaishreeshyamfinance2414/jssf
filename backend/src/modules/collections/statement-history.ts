@@ -10,9 +10,9 @@ export function historyCtes(scoped: boolean, includeClosed = false): string {
      WHERE ${scoped ? `id = $1${includeClosed ? '' : ' AND closed_by IS NULL'}` : "status = 'active'"}
   ),
   receipts AS MATERIALIZED (
-    SELECT c.loan_id, c.collected_at::date AS day, sum(c.amount + c.penalty) AS received
+    SELECT c.loan_id, (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date AS day, sum(c.amount + c.penalty) AS received
       FROM collections c JOIN scope s ON s.id = c.loan_id
-     GROUP BY c.loan_id, c.collected_at::date
+     GROUP BY c.loan_id, (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date
   ),
   contracts AS MATERIALIZED (
     SELECT e.loan_id,sum(e.due_amount) AS total FROM emi_schedule e
@@ -67,14 +67,14 @@ export async function reconcileHistory(loanId: string | null, client: PoolClient
     SELECT c.id, CASE WHEN r.received_by_day > r.due_by_day THEN 'advance'::payment_type
                      WHEN r.received_by_day = r.due_by_day THEN 'full'::payment_type
                      ELSE 'partial'::payment_type END AS desired_type
-      FROM collections c JOIN running r ON r.loan_id = c.loan_id AND r.day = c.collected_at::date
+      FROM collections c JOIN running r ON r.loan_id = c.loan_id AND r.day = (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date
      WHERE c.amount + c.penalty > 0
   ) UPDATE collections c SET type = t.desired_type FROM classified t
      WHERE c.id = t.id AND c.type IS DISTINCT FROM t.desired_type`, params);
   // A backdated payoff can make later zero-money system rows unnecessary.
   // Preserve every real/manual entry, including zero-value admin entries.
   await client.query(`WITH ${ctes} DELETE FROM collections c USING historical h
-    WHERE c.loan_id = h.loan_id AND c.collected_at::date = h.due_date
+    WHERE c.loan_id = h.loan_id AND (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date = h.due_date
       AND NOT h.should_create AND c.amount = 0 AND c.penalty = 0
       AND c.created_by IS NULL AND c.note IN (
         'Auto-marked: no collection recorded for this day',
@@ -91,28 +91,26 @@ export async function reconcileHistory(loanId: string | null, client: PoolClient
                        ELSE 'Auto-marked: advance coverage completed on time' END
       FROM historical h
      WHERE c.loan_id = h.loan_id
-       AND c.collected_at >= h.due_date::timestamp
-       AND c.collected_at < h.due_date::timestamp + interval '1 day'
+       AND (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date = h.due_date
        AND h.due_date <= CURRENT_DATE
        AND c.amount = 0 AND c.penalty = 0
        AND c.type IN ('missed','advance','full','partial')
        AND c.type IS DISTINCT FROM h.desired_type`, params);
 
   const { rows } = await client.query<{ type: string }>(`WITH ${ctes}
-    INSERT INTO collections(loan_id, emi_id, amount, penalty, type, mode, note, reconciled_at, collected_at)
+    INSERT INTO collections(loan_id, emi_id, amount, penalty, type, mode, note, reconciled_at, entry_date)
     SELECT h.loan_id, h.id, 0, 0, h.desired_type, 'cash',
            CASE WHEN h.desired_type = 'missed' THEN 'Auto-marked: no collection recorded for this day'
                 WHEN h.desired_type = 'advance' THEN 'Auto-marked: installment covered by advance payment'
                 ELSE 'Auto-marked: advance coverage completed on time' END,
-           now(), h.due_date::timestamp + interval '23 hours 59 minutes'
+           now(), ((h.due_date::timestamp + interval '23 hours 59 minutes') AT TIME ZONE 'Asia/Kolkata')
       FROM historical h
      WHERE h.due_date < CURRENT_DATE
        AND h.should_create
        ${deletedAt && loanId ? 'AND h.due_date <> $2::timestamptz::date' : ''}
        AND NOT EXISTS (
          SELECT 1 FROM collections c WHERE c.loan_id = h.loan_id
-          AND c.collected_at >= h.due_date::timestamp
-          AND c.collected_at < h.due_date::timestamp + interval '1 day'
+          AND (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date = h.due_date
        )
     RETURNING type`, deletedAt && loanId ? [...params, deletedAt] : params);
   return {
@@ -141,9 +139,9 @@ export async function reconcileHistoricalPenalties(loanId: string | null, client
       SELECT e.loan_id, e.due_date AS day, e.due_amount AS due, 0::numeric AS received
         FROM emi_schedule e JOIN scope s ON s.id = e.loan_id WHERE e.due_date <= CURRENT_DATE
       UNION ALL
-      SELECT c.loan_id, c.collected_at::date, 0::numeric, c.amount + c.penalty
+      SELECT c.loan_id, (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date, 0::numeric, c.amount + c.penalty
         FROM collections c JOIN scope s ON s.id = c.loan_id
-       WHERE c.collected_at < CURRENT_DATE::timestamp + interval '1 day'
+       WHERE c.entry_date <= now()
       UNION ALL
       SELECT s.id, d::date, 0::numeric, 0::numeric FROM scope s
         CROSS JOIN LATERAL generate_series(s.loan_date,CURRENT_DATE,interval '1 day') d

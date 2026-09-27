@@ -258,7 +258,7 @@ export const loanRepository = {
     await client.query(
       `UPDATE collections c SET emi_id = (
          SELECT e.id FROM emi_schedule e
-          WHERE e.loan_id = c.loan_id AND e.due_date = c.collected_at::date
+          WHERE e.loan_id = c.loan_id AND e.due_date = (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date
           ORDER BY e.installment_no LIMIT 1)
         WHERE c.loan_id = $1 AND c.amount = 0 AND c.penalty = 0
           AND c.created_by IS NULL AND c.note IN (
@@ -325,7 +325,7 @@ export const loanRepository = {
     const { rows } = await client.query<{ installments: string; shortfall: string }>(
       `SELECT (SELECT count(*) FROM emi_schedule WHERE loan_id = $1)::text AS installments,
               (SELECT l.total_payable - COALESCE((SELECT sum(c.amount + c.penalty) FROM collections c WHERE c.loan_id = l.id
-                 AND c.collected_at < CURRENT_DATE::timestamp + interval '1 day'), 0)
+                 AND c.entry_date <= now()), 0)
                  FROM loans l WHERE l.id = $1)::text AS shortfall`,
       [loanId],
     );
@@ -397,8 +397,8 @@ export const loanRepository = {
   async collectionsFor(loanId: string) {
     const { rows } = await query(
       `WITH ${historyCtes(true, true)}
-       SELECT co.*, co.collected_at::date::text AS entry_date,
-              (row_number() OVER (ORDER BY co.collected_at ASC, co.id ASC))::int AS statement_no,
+       SELECT co.*,
+              (row_number() OVER (ORDER BY co.entry_date ASC, co.id ASC))::int AS statement_no,
               r.due_by_day AS expected_by_day, r.received_by_day AS received_by_day,
               CASE WHEN r.received_by_day > r.due_by_day THEN 'advance'
                    WHEN co.amount + co.penalty = 0 AND r.received_by_day < r.due_by_day THEN 'missed'
@@ -406,17 +406,17 @@ export const loanRepository = {
                      OR r.received_by_day - r.day_received < r.due_by_day - r.day_due) THEN 'delayed'
                    ELSE 'on_time' END AS timing,
               COALESCE(agent.full_name, creator.full_name, 'Automatic') AS agent_name,
-              e.installment_no, COALESCE(e.due_date,co.collected_at::date) AS due_date,
+              e.installment_no, COALESCE(e.due_date,(co.entry_date AT TIME ZONE 'Asia/Kolkata')::date) AS due_date,
               e.due_amount, e.status AS emi_status,
               COALESCE((SELECT p.amount FROM loan_daily_penalties p
-                WHERE p.loan_id = co.loan_id AND p.penalty_date = co.collected_at::date
+                WHERE p.loan_id = co.loan_id AND p.penalty_date = (co.entry_date AT TIME ZONE 'Asia/Kolkata')::date
                   AND p.penalty_date < CURRENT_DATE),0) AS missed_penalty
          FROM collections co
-         JOIN running r ON r.loan_id = co.loan_id AND r.day = co.collected_at::date
+         JOIN running r ON r.loan_id = co.loan_id AND r.day = (co.entry_date AT TIME ZONE 'Asia/Kolkata')::date
          LEFT JOIN users agent ON agent.id = co.agent_id
          LEFT JOIN users creator ON creator.id = co.created_by
          LEFT JOIN emi_schedule e ON e.id = co.emi_id
-        WHERE co.loan_id = $1 ORDER BY co.collected_at ASC, co.id ASC`,
+        WHERE co.loan_id = $1 ORDER BY co.entry_date ASC, co.id ASC`,
       [loanId],
     );
     return rows;

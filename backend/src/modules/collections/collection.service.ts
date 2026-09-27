@@ -16,10 +16,10 @@ export const collectionService = {
       const loan = await loanRepository.lockForUpdate(input.loanId, client);
       if (!loan) throw BadRequest('Loan not found');
       if (loan.status !== 'active') throw BadRequest('Collections can be recorded only for active loans');
-      if (input.collectedAt && actorRole !== 'admin') {
+      if (input.entryDate && actorRole !== 'admin') {
         throw BadRequest('Only an admin can select a collection entry date and time');
       }
-      if (input.collectedAt && Date.parse(input.collectedAt) > Date.now()) {
+      if (input.entryDate && Date.parse(input.entryDate) > Date.now()) {
         throw BadRequest('Collection entry date and time cannot be in the future');
       }
 
@@ -30,7 +30,7 @@ export const collectionService = {
            ($1::timestamptz AT TIME ZONE 'Asia/Kolkata')::date,
            (now() AT TIME ZONE 'Asia/Kolkata')::date
          )::text AS day`,
-        [input.collectedAt ?? null],
+        [input.entryDate ?? null],
       );
       const collectionDate = businessDates[0].day;
 
@@ -79,12 +79,12 @@ export const collectionService = {
       const { rows: entriesOnDate } = await client.query<{ type: string }>(
         `SELECT type FROM collections
           WHERE loan_id = $1
-            AND (collected_at AT TIME ZONE 'Asia/Kolkata')::date = $2::date
+            AND (entry_date AT TIME ZONE 'Asia/Kolkata')::date = $2::date
           LIMIT 1`,
         [input.loanId, collectionDate],
       );
       if (entriesOnDate[0]) {
-        if (input.collectedAt) {
+        if (input.entryDate) {
           throw BadRequest('This loan already has an entry available on the selected date.');
         }
         throw BadRequest(
@@ -114,7 +114,7 @@ export const collectionService = {
               loanId: input.loanId,
               type: 'missed',
               emiId: input.emiId,
-              collectedAt: input.collectedAt ?? null,
+              entryDate: input.entryDate ?? null,
             },
             ip,
           },
@@ -174,7 +174,7 @@ export const collectionService = {
           referenceId: collection.id,
           description: `Collection for ${loan.loan_number}`,
           createdBy: actorId,
-          txnDate: input.collectedAt ? collectionDate : null,
+          txnDate: input.entryDate ? collectionDate : null,
         });
       }
 
@@ -190,7 +190,7 @@ export const collectionService = {
             penalty: input.penalty,
             mode: input.mode,
             type,
-            collectedAt: input.collectedAt ?? null,
+            entryDate: input.entryDate ?? null,
           },
           ip,
         },
@@ -259,15 +259,16 @@ export const collectionService = {
         throw BadRequest(`Amount exceeds the loan's total payable. Maximum for this entry: ₹${room.toFixed(2)}.`);
       }
 
-      // New date keeps the entry's original time-of-day so intra-day ordering
-      // survives the move.
-      let collectedAt: string | null = null;
-      if (input.collectedDate) {
-        collectedAt = input.collectedDate;
+      let entryDate: string | null = null;
+      if (input.entryDate) {
+        if (actorRole !== 'admin') throw BadRequest('Only an admin can change a collection entry date and time.');
+        if (Date.parse(input.entryDate) > Date.now()) throw BadRequest('Collection entry date and time cannot be in the future.');
+        entryDate = input.entryDate;
         const { rows: duplicate } = await client.query(`SELECT 1 FROM collections
-          WHERE loan_id = $1 AND id <> $2 AND collected_at >= $3::date
-            AND collected_at < $3::date + interval '1 day' LIMIT 1`,
-          [collection.loan_id, id, collectedAt]);
+          WHERE loan_id = $1 AND id <> $2
+            AND (entry_date AT TIME ZONE 'Asia/Kolkata')::date =
+                ($3::timestamptz AT TIME ZONE 'Asia/Kolkata')::date LIMIT 1`,
+          [collection.loan_id, id, entryDate]);
         if (duplicate.length) throw BadRequest('This loan already has an entry available on the selected date.');
       }
 
@@ -277,12 +278,19 @@ export const collectionService = {
           amount: newAmount,
           penalty: newPenalty,
           type: newType,
-          collectedAt,
+          entryDate,
           takeOwnership: wasAutomaticCoverageMarker || (isConvertingToPaid && !collection.created_by)
             ? { actorId } : undefined,
         },
         client,
       );
+
+      const { rows: updatedDates } = await client.query<{ day: string }>(
+        `SELECT (entry_date AT TIME ZONE 'Asia/Kolkata')::date::text AS day
+           FROM collections WHERE id = $1`,
+        [id],
+      );
+      const ledgerDate = updatedDates[0].day;
 
       // Handle ledger adjustments for type conversions & amount edits:
       if (isConvertingToMissed) {
@@ -302,7 +310,7 @@ export const collectionService = {
           referenceId: id,
           description: `Collection (type correction) for ${loan.loan_number}`,
           createdBy: actorId,
-          txnDate: input.collectedDate ?? collection.entry_date,
+          txnDate: ledgerDate,
         });
       } else if (oldAmount + oldPenalty === 0 && newAmount + newPenalty > 0) {
         // Editing a generated zero-value row into a real payment makes the
@@ -317,14 +325,14 @@ export const collectionService = {
           referenceId: id,
           description: `Collection (automatic entry correction) for ${loan.loan_number}`,
           createdBy: actorId,
-          txnDate: input.collectedDate ?? collection.entry_date,
+          txnDate: ledgerDate,
         });
       } else if (collection.type !== 'missed') {
         // Regular amount/penalty/date edit on a payment entry
         await accountsRepository.updateBySourceRef(
           'collection',
           id,
-          { amount: newAmount + newPenalty, txnDate: input.collectedDate ?? null },
+          { amount: newAmount + newPenalty, txnDate: input.entryDate ? ledgerDate : null },
           client,
         );
         const delta = oldAmount + oldPenalty - (newAmount + newPenalty);
@@ -353,7 +361,7 @@ export const collectionService = {
             type: { from: collection.type, to: newType },
             amount: { from: oldAmount, to: newAmount },
             penalty: { from: oldPenalty, to: newPenalty },
-            collectedDate: input.collectedDate ?? null,
+            entryDate: input.entryDate ?? null,
           },
           ip,
         },

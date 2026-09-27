@@ -34,7 +34,7 @@ interface Due {
   received: string;
   remaining: string;
 }
-interface Collection { id: string; loan_number: string; customer_name: string; amount: string; penalty: string; type: string; mode: string; collected_at: string; agent_name: string | null; agent_ledger_id: string | null; missed_penalty: string | null; note: string | null }
+interface Collection { id: string; loan_number: string; customer_name: string; amount: string; penalty: string; type: string; mode: string; entry_date: string; agent_name: string | null; agent_ledger_id: string | null; missed_penalty: string | null; note: string | null }
 interface LoanSearchResult {
   id: string;
   loan_number: string;
@@ -107,16 +107,20 @@ function indiaLocalToIso(value: string): string {
   return new Date(`${value}${INDIA_OFFSET}`).toISOString();
 }
 
+function indiaTimestampToLocal(value: string): string {
+  return new Date(new Date(value).getTime() + 330 * 60 * 1000).toISOString().slice(0, 19);
+}
+
 export default function CollectionsPage() {
   const qc = useQueryClient();
   const { can, user } = useAuth();
-  const [manual, setManual] = useState({ amount: '', mode: 'cash', collectedAt: indiaNowLocal() });
+  const [manual, setManual] = useState({ amount: '', mode: 'cash', entryDate: indiaNowLocal() });
   const [search, setSearch] = useState('');
   const [selectedLoan, setSelectedLoan] = useState<LoanSearchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showLedger, setShowLedger] = useState(false);
   const [editing, setEditing] = useState<Collection | null>(null);
-  const [editForm, setEditForm] = useState({ amount: '', penalty: '', type: 'full', collectedDate: '' });
+  const [editForm, setEditForm] = useState({ amount: '', penalty: '', type: 'full', entryDate: '' });
   const [sort, setSort] = useState<SortKey>('due_date_asc');
   const { data: due = [] } = useQuery({ queryKey: ['collections', 'due'], queryFn: () => apiGet<Due[]>('/collections/due') });
   const { data: collections = [] } = useQuery({ queryKey: ['collections'], queryFn: () => apiGet<Collection[]>('/collections') });
@@ -140,7 +144,7 @@ export default function CollectionsPage() {
     mutationFn: (body: unknown) => apiPost('/collections', body),
     onSuccess: () => {
       setError(null);
-      setManual({ amount: '', mode: 'cash', collectedAt: indiaNowLocal() });
+      setManual({ amount: '', mode: 'cash', entryDate: indiaNowLocal() });
       setSearch('');
       setSelectedLoan(null);
       return invalidate();
@@ -181,7 +185,7 @@ export default function CollectionsPage() {
       amount: String(Number(c.amount)),
       penalty: String(Number(c.penalty)),
       type: c.type,
-      collectedDate: new Date(c.collected_at).toISOString().slice(0, 10),
+      entryDate: indiaTimestampToLocal(c.entry_date),
     });
   };
   return (
@@ -208,7 +212,7 @@ export default function CollectionsPage() {
                   amount: 0,
                   mode: 'cash',
                   type: 'missed',
-                  ...(user?.role === 'admin' ? { collectedAt: indiaLocalToIso(manual.collectedAt) } : {}),
+                  ...(user?.role === 'admin' ? { entryDate: indiaLocalToIso(manual.entryDate) } : {}),
                 });
                 return;
               }
@@ -222,7 +226,7 @@ export default function CollectionsPage() {
                 emiId: selectedLoan.next_emi?.id ?? null,
                 amount: Number(manual.amount),
                 mode: manual.mode,
-                ...(user?.role === 'admin' ? { collectedAt: indiaLocalToIso(manual.collectedAt) } : {}),
+                ...(user?.role === 'admin' ? { entryDate: indiaLocalToIso(manual.entryDate) } : {}),
               });
             }}
           >
@@ -248,7 +252,7 @@ export default function CollectionsPage() {
                         setManual({
                           ...manual,
                           amount: String(Number(loan.next_emi?.remainingAmount ?? loan.emi_amount)),
-                          collectedAt: indiaNowLocal(),
+                          entryDate: indiaNowLocal(),
                         });
                       }}
                     >
@@ -305,8 +309,8 @@ export default function CollectionsPage() {
                   step="1"
                   max={indiaNowLocal()}
                   aria-label="Entry date and time"
-                  value={manual.collectedAt}
-                  onChange={(e) => setManual({ ...manual, collectedAt: e.target.value })}
+                  value={manual.entryDate}
+                  onChange={(e) => setManual({ ...manual, entryDate: e.target.value })}
                   required
                 />
               </label>
@@ -390,10 +394,8 @@ export default function CollectionsPage() {
               className="grid gap-3 md:grid-cols-5"
               onSubmit={(e) => {
                 e.preventDefault();
-                const body: Record<string, unknown> = {
-                  collectedDate: editForm.collectedDate,
-                  type: editForm.type,
-                };
+                const body: Record<string, unknown> = { type: editForm.type };
+                if (user?.role === 'admin') body.entryDate = indiaLocalToIso(editForm.entryDate);
                 if (editForm.type !== 'missed') {
                   body.amount = Number(editForm.amount);
                   body.penalty = Number(editForm.penalty || 0);
@@ -440,9 +442,12 @@ export default function CollectionsPage() {
                 disabled={editForm.type === 'missed'}
               />
               <Input
-                type="date"
-                value={editForm.collectedDate}
-                onChange={(e) => setEditForm({ ...editForm, collectedDate: e.target.value })}
+                type="datetime-local"
+                step="1"
+                max={indiaNowLocal()}
+                value={editForm.entryDate}
+                onChange={(e) => setEditForm({ ...editForm, entryDate: e.target.value })}
+                disabled={user?.role !== 'admin'}
                 required
               />
               <div className="flex gap-2">
@@ -460,7 +465,7 @@ export default function CollectionsPage() {
             const isCoverageMarker = Number(c.amount) === 0 && ['advance', 'full'].includes(c.type) && c.note?.startsWith('Auto-marked:');
             const canModifyCoverageMarker = !isCoverageMarker || user?.role === 'admin';
             return [
-              dateTime(c.collected_at),
+              dateTime(c.entry_date),
               c.loan_number,
               c.customer_name,
               money(c.amount),

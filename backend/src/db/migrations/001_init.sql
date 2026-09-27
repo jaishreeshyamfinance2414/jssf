@@ -232,14 +232,14 @@ CREATE TABLE collections (
   penalty       numeric(14,2) NOT NULL DEFAULT 0,
   type          payment_type NOT NULL DEFAULT 'full',
   mode          payment_mode NOT NULL DEFAULT 'cash',
-  collected_at  timestamptz NOT NULL DEFAULT now(),
+  entry_date    timestamptz NOT NULL DEFAULT now(),
   note          text,
   created_by    uuid REFERENCES users(id),
   created_at    timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_collections_loan  ON collections(loan_id);
 CREATE INDEX idx_collections_agent ON collections(agent_id);
-CREATE INDEX idx_collections_date  ON collections(collected_at);
+CREATE INDEX idx_collections_date  ON collections(entry_date);
 CREATE INDEX idx_collections_area  ON collections(area_id);
 
 -- Agent cash submission + shortage tracking (agent ledger).
