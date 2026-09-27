@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requirePermission } from '../../middleware/auth';
+import { authenticate, requirePermission, requireRole } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
-import { createCapitalEntrySchema } from './capital.schema';
+import { createCapitalEntrySchema, createCapitalWithdrawalSchema } from './capital.schema';
 import { capitalController } from './capital.controller';
 
 const router = Router();
@@ -12,8 +12,16 @@ router.get('/', requirePermission('capital.view'), asyncHandler(capitalControlle
 router.post(
   '/',
   requirePermission('capital.manage'),
+  requireRole('admin'),
   validate({ body: createCapitalEntrySchema }),
   asyncHandler(capitalController.create),
+);
+router.post(
+  '/withdrawals',
+  requirePermission('capital.manage'),
+  requireRole('admin'),
+  validate({ body: createCapitalWithdrawalSchema }),
+  asyncHandler(capitalController.withdraw),
 );
 
 export default router;

@@ -46,6 +46,7 @@ type TabKey = (typeof TABS)[number]['key'];
 const TYPE_LABEL: Record<string, string> = { full: 'Full', partial: 'Partial', advance: 'Advance', missed: 'Missed' };
 const SOURCE_LABEL: Record<string, string> = {
   capital: 'Capital', collection: 'Collection', agent_submission: 'Agent Handover',
+  capital_withdrawal: 'Capital Withdrawal',
   loan_disbursement: 'Disbursement', expense: 'Expense', salary: 'Salary', adjustment: 'Adjustment',
 };
 

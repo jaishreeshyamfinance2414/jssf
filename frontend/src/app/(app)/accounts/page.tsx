@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Wallet } from 'lucide-react';
 import { apiGet } from '@/lib/api';
-import { dateTime, money } from '@/lib/format';
+import { date, money } from '@/lib/format';
 import { PageShell } from '@/components/app/page-shell';
 import { DataTable } from '@/components/app/data-table';
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,7 @@ interface Txn {
 
 const SOURCE_LABEL: Record<string, string> = {
   capital: 'Capital Introduced',
+  capital_withdrawal: 'Capital Withdrawn',
   collection: 'Collection Received',
   agent_submission: 'Agent Cash Submission',
   loan_disbursement: 'Loan Disbursed',
@@ -66,9 +67,9 @@ export default function AccountsPage() {
           <CardHeader><CardTitle>{openAccount.name} — Ledger (how the balance arrived)</CardTitle></CardHeader>
           <CardContent>
             <DataTable
-              columns={['Date & Time', 'Description', 'Source', 'Credit', 'Debit', 'Running Balance']}
+              columns={['Transaction Date', 'Description', 'Source', 'Credit', 'Debit', 'Running Balance']}
               rows={txns.map((t) => [
-                dateTime(t.created_at),
+                date(t.txn_date),
                 t.description || SOURCE_LABEL[t.source] || t.source,
                 SOURCE_LABEL[t.source] ?? t.source,
                 t.direction === 'credit' ? money(t.amount) : '-',

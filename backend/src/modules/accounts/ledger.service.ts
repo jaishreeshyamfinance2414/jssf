@@ -4,6 +4,7 @@ import { accountsRepository } from './accounts.repository';
 
 export type LedgerSource =
   | 'capital'
+  | 'capital_withdrawal'
   | 'collection'
   | 'agent_submission'
   | 'loan_disbursement'
