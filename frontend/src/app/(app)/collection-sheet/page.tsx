@@ -16,6 +16,7 @@ interface SheetRow {
   customer_name: string;
   customer_work: string | null;
   customer_mobile: string;
+  area_id: string | null;
   area_name: string | null;
   principal: string;
   total_payable: string;
@@ -130,8 +131,8 @@ export default function CollectionSheetPage() {
     refetchInterval: 30_000,
   });
   const { data: agents = [] } = useQuery({
-    queryKey: ['collection-sheet-agents'],
-    queryFn: () => apiGet<AgentTotal[]>('/collections/sheet/agents'),
+    queryKey: ['collection-sheet-agents', area],
+    queryFn: () => apiGet<AgentTotal[]>(`/collections/sheet/agents${area === 'all' ? '' : `?areaId=${encodeURIComponent(area)}`}`),
     staleTime: 0,
     refetchOnMount: 'always',
     refetchOnWindowFocus: 'always',
@@ -139,11 +140,12 @@ export default function CollectionSheetPage() {
   });
 
   // Areas present in the sheet (from the loaded rows — no extra API call).
-  const areas = [...new Set(rows.map((r) => r.area_name).filter((a): a is string => !!a))].sort();
+  const areas = [...new Map(rows.filter((r) => r.area_id && r.area_name).map((r) => [r.area_id!, r.area_name!])).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1]));
   const areaFiltered =
     area === 'all' ? rows
-    : area === 'none' ? rows.filter((r) => !r.area_name)
-    : rows.filter((r) => r.area_name === area);
+    : area === 'none' ? rows.filter((r) => !r.area_id)
+    : rows.filter((r) => r.area_id === area);
   const visible = sortRows(areaFiltered, sort);
 
   const pendingCount = areaFiltered.filter((r) => !isDone(r)).length;
@@ -166,7 +168,7 @@ export default function CollectionSheetPage() {
           onChange={(e) => setArea(e.target.value)}
         >
           <option value="all">All Areas</option>
-          {areas.map((a) => <option key={a} value={a}>{a}</option>)}
+          {areas.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           <option value="none">No Area</option>
         </select>
         <ArrowUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />

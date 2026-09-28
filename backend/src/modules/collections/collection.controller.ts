@@ -4,7 +4,7 @@ import { collectionRepository } from './collection.repository';
 import { collectionService } from './collection.service';
 import { sweepMissedEmis } from './missed-emi.job';
 import { query } from '../../db/pool';
-import { NotFound } from '../../shared/errors';
+import { BadRequest, NotFound } from '../../shared/errors';
 
 async function requireLoanArea(req: Request, loanId: string) {
   if (!req.areaIds) return;
@@ -41,7 +41,15 @@ export const collectionController = {
   },
 
   async sheetAgents(req: Request, res: Response) {
-    return ok(res, await collectionRepository.sheetAgents(req.areaIds));
+    const requestedArea = typeof req.query.areaId === 'string' ? req.query.areaId : undefined;
+    let areaIds = req.areaIds;
+    let unassigned = false;
+    if (!areaIds && requestedArea) {
+      if (requestedArea === 'none') unassigned = true;
+      else if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestedArea)) areaIds = [requestedArea];
+      else throw BadRequest('Invalid area');
+    }
+    return ok(res, await collectionRepository.sheetAgents(areaIds, unassigned));
   },
 
   async sweep(_req: Request, res: Response) {

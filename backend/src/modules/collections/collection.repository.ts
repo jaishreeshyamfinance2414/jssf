@@ -80,7 +80,7 @@ export const collectionRepository = {
     const { rows } = await query(
       `SELECT l.id AS loan_id, l.loan_number, l.principal, dues.total_payable, l.emi_amount,
               l.emi_frequency, l.loan_date::text AS start_date,
-              c.full_name AS customer_name, c.mobile AS customer_mobile,
+              c.full_name AS customer_name, c.mobile AS customer_mobile, c.area_id,
               c.work AS customer_work,
               a.name AS area_name,
               coverage.missed_count, balance.shortfall::text AS due_till_today,
@@ -111,7 +111,7 @@ export const collectionRepository = {
   },
 
   /** Today's collected totals per agent (split by cash / bank), for the collection-sheet footer. */
-  async sheetAgents(areaIds?: string[]) {
+  async sheetAgents(areaIds?: string[], unassigned = false) {
     const { rows } = await query(
       `SELECT u.id AS agent_id, u.full_name AS agent_name,
               COALESCE(sum(co.amount), 0)::text AS collected,
@@ -124,6 +124,7 @@ export const collectionRepository = {
          JOIN customers c ON c.id = l.customer_id
         WHERE (co.entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date
           ${areaIds ? 'AND c.area_id = ANY($1::uuid[])' : ''}
+          ${unassigned ? 'AND c.area_id IS NULL' : ''}
         GROUP BY u.id, u.full_name
         ORDER BY sum(co.amount) DESC`,
       areaIds ? [areaIds] : [],
