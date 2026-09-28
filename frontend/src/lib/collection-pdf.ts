@@ -38,7 +38,6 @@ const d = (v: string | null | undefined) => {
 const DAY_MS = 86_400_000;
 const sod = (v: string) => { const x = new Date(v); x.setHours(0, 0, 0, 0); return x.getTime(); };
 const now = () => sod(new Date().toISOString());
-const daysComp = (r: PdfRow) => Math.max(0, Math.floor((now() - sod(r.start_date)) / DAY_MS));
 const daysRem = (r: PdfRow) =>
   r.closing_date ? Math.max(0, Math.ceil((sod(r.closing_date) - now()) / DAY_MS)) : '';
 
@@ -50,8 +49,8 @@ function formatNameWork(name: string, work: string | null | undefined): string {
 
 /**
  * Build the "Amount Given" cell value from collected data.
- *  - EMI paid (full/partial/advance) + cash → "Amount (C)"  → actually show amount + "(C)"
- *  - EMI paid + upi/bank → amount + "(B)"
+ *  - cash → "amount (C)"
+ *  - upi/bank → "amount (B)"
  *  - missed → "Missed"
  *  - no entry → ''
  */
@@ -62,6 +61,14 @@ function amountGivenCell(loanId: string, collectionMap: Map<string, DateCollecti
   const amt = n(entry.amount);
   if (entry.mode === 'cash') return `${amt} (C)`;
   return `${amt} (B)`;
+}
+
+/** Determine the colour tag for an Amount Given cell. */
+function amountGivenTag(loanId: string, collectionMap: Map<string, DateCollectionEntry>): 'cash' | 'bank' | 'missed' | null {
+  const entry = collectionMap.get(loanId);
+  if (!entry) return null;
+  if (entry.type === 'missed') return 'missed';
+  return entry.mode === 'cash' ? 'cash' : 'bank';
 }
 
 export function downloadCollectionPdf(
@@ -134,9 +141,18 @@ export function downloadCollectionPdf(
     }
   }
 
+  // Store per-row colour tags so didParseCell can colour them
+  const amountTags: (ReturnType<typeof amountGivenTag>)[] = rows.map((r) =>
+    collectedData ? amountGivenTag(r.loan_id, collectionMap) : null,
+  );
+
+  // Columns (Spent removed — was "days since start", not useful on paper)
+  // Index: 0=S.No  1=Name  2=AmountGiven  3=EMI  4=Tut  5=TodayBal
+  //        6=Mobile  7=Left  8=StartDate  9=ClosingDate
+  //        10=LoanAmt  11=Received  12=Balance  13=Penalty
   const headers = [
     'S.No.', 'Name', 'Amount\nGiven', 'EMI', 'Tut', 'Today\nBal.',
-    'Mobile No.', 'Spent', 'Left', 'Start\nDate', 'Closing\nDate',
+    'Mobile No.', 'Left', 'Start\nDate', 'Closing\nDate',
     'Loan\nAmt', 'Received', 'Balance', 'Penalty',
   ];
 
@@ -148,7 +164,6 @@ export function downloadCollectionPdf(
     r.missed_count || '',
     n(r.due_till_today),
     r.customer_mobile,
-    daysComp(r),
     daysRem(r),
     d(r.start_date),
     d(r.closing_date),
@@ -164,7 +179,7 @@ export function downloadCollectionPdf(
     body,
     styles: {
       font: 'helvetica',
-      fontSize: 9,
+      fontSize: 8,
       cellPadding: { top: 1.5, bottom: 1.5, left: 1, right: 1 },
       lineColor: [0, 0, 0],
       lineWidth: 0.15,
@@ -179,7 +194,7 @@ export function downloadCollectionPdf(
       textColor: [255, 255, 255],
       fontStyle: 'bold',
       halign: 'center',
-      fontSize: 9,
+      fontSize: 8.5,
       cellPadding: 1.2,
       overflow: 'visible',
     },
@@ -188,25 +203,43 @@ export function downloadCollectionPdf(
     },
     alternateRowStyles: { fillColor: false },
     columnStyles: {
-      0:  { halign: 'center', cellWidth: 9 },
-      1:  { halign: 'left', cellWidth: 28, overflow: 'linebreak' },
-      2:  { cellWidth: 15 },
-      6:  { cellWidth: 21 },
-      7:  { cellWidth: 10 },
-      8:  { cellWidth: 10 },
-      9:  { cellWidth: 15 },
-      10: { cellWidth: 15 },
-      11: { cellWidth: 14 },
+      0:  { halign: 'center', cellWidth: 9 },       // S.No.
+      1:  { halign: 'left', cellWidth: 32, overflow: 'linebreak' }, // Name (+4)
+      2:  { cellWidth: 18, fontStyle: 'bold' },      // Amount Given (+3)
+      3:  { cellWidth: 13 },                          // EMI (+auto→13)
+      4:  { cellWidth: 10 },                          // Tut (+auto→10)
+      5:  { cellWidth: 14 },                          // Today Bal. (+auto→14)
+      6:  { cellWidth: 21 },                          // Mobile
+      7:  { cellWidth: 10 },                          // Left (was index 8)
+      8:  { cellWidth: 15 },                          // Start Date
+      9:  { cellWidth: 15 },                          // Closing Date
+      10: { cellWidth: 14 },                          // Loan Amt
     },
     theme: 'grid',
     margin: { left: mx, right: mx },
     tableWidth: 'auto',
     didParseCell(data) {
       if (data.section !== 'body') return;
-      // Highlight Tut column only when missed >= 5
+
+      // Highlight Tut column when missed >= 5
       if (data.column.index === 4 && Number(data.cell.raw) >= 5) {
         data.cell.styles.fillColor = [220, 50, 50];
         data.cell.styles.textColor = [255, 255, 255];
+      }
+
+      // Colour the Amount Given column (index 2)
+      if (data.column.index === 2) {
+        const tag = amountTags[data.row.index];
+        if (tag === 'cash') {
+          // Green for cash
+          data.cell.styles.textColor = [0, 140, 0];
+        } else if (tag === 'bank') {
+          // Orange-green for bank/UPI
+          data.cell.styles.textColor = [200, 120, 0];
+        } else if (tag === 'missed') {
+          // Red for missed
+          data.cell.styles.textColor = [210, 20, 20];
+        }
       }
     },
   });
