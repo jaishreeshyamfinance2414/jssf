@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowUpDown, CheckCircle2, Clock, Download, History, MapPin, Phone, Users } from 'lucide-react';
-import { downloadCollectionPdf } from '@/lib/collection-pdf';
+import { downloadCollectionPdf, type DateCollectionEntry } from '@/lib/collection-pdf';
 import { apiGet } from '@/lib/api';
 import { date, money } from '@/lib/format';
 import { loanTypeLabel } from '@/lib/loan-type';
@@ -18,6 +18,7 @@ interface SheetRow {
   customer_mobile: string;
   area_id: string | null;
   area_name: string | null;
+  area_code: string | null;
   principal: string;
   total_payable: string;
   emi_amount: string;
@@ -120,6 +121,7 @@ export default function CollectionSheetPage() {
   const [pdfDate, setPdfDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
+  const [wantCollected, setWantCollected] = useState(false);
   const { data: rows = [] } = useQuery({
     queryKey: ['collection-sheet'],
     queryFn: () => apiGet<SheetRow[]>('/collections/sheet'),
@@ -140,8 +142,8 @@ export default function CollectionSheetPage() {
   });
 
   // Areas present in the sheet (from the loaded rows — no extra API call).
-  const areas = [...new Map(rows.filter((r) => r.area_id && r.area_name).map((r) => [r.area_id!, r.area_name!])).entries()]
-    .sort((a, b) => a[1].localeCompare(b[1]));
+  const areas = [...new Map(rows.filter((r) => r.area_id && r.area_name).map((r) => [r.area_id!, { name: r.area_name!, code: r.area_code }] as const)).entries()]
+    .sort((a, b) => a[1].name.localeCompare(b[1].name));
   const areaFiltered =
     area === 'all' ? rows
     : area === 'none' ? rows.filter((r) => !r.area_id)
@@ -168,7 +170,7 @@ export default function CollectionSheetPage() {
           onChange={(e) => setArea(e.target.value)}
         >
           <option value="all">All Areas</option>
-          {areas.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          {areas.map(([id, { name }]) => <option key={id} value={id}>{name}</option>)}
           <option value="none">No Area</option>
         </select>
         <ArrowUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -193,14 +195,27 @@ export default function CollectionSheetPage() {
       </div>
       {showPdfModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowPdfModal(false)}>
-          <div className="rounded-lg border bg-card p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
-            <h3 className="mb-4 text-lg font-semibold">Select Collection Date</h3>
+          <div className="w-80 rounded-lg border bg-card p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
+            <h3 className="mb-4 text-lg font-semibold">Download Collection PDF</h3>
+            <label className="mb-1 block text-sm font-medium">Select Date</label>
             <input
               type="date"
               className="h-10 w-full rounded-md border bg-background px-3 text-sm"
               value={pdfDate}
               onChange={(e) => setPdfDate(e.target.value)}
             />
+            <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-gray-300"
+                checked={wantCollected}
+                onChange={(e) => setWantCollected(e.target.checked)}
+              />
+              Want Collected Data?
+            </label>
+            <p className="ml-6 text-xs text-muted-foreground">
+              Fill the Amount Given column with recorded entries for the selected date.
+            </p>
             <div className="mt-4 flex gap-2">
               <button
                 onClick={async () => {
@@ -212,10 +227,31 @@ export default function CollectionSheetPage() {
                     const branding = await apiGet<{ businessName: string }>('/settings/branding');
                     const [year, month, day] = pdfDate.split('-');
                     const formatted = `${day}/${month}/${year}`;
-                    downloadCollectionPdf(visible, formatted, branding.businessName);
+
+                    // Build area label for the PDF
+                    let areaLabel = 'All Area Data';
+                    if (area !== 'all' && area !== 'none') {
+                      const found = areas.find(([id]) => id === area);
+                      if (found) {
+                        const { name, code } = found[1];
+                        areaLabel = code ? `${name} (${code})` : name;
+                      }
+                    } else if (area === 'none') {
+                      areaLabel = 'No Area';
+                    }
+
+                    // Optionally fetch collected data for the selected date
+                    let collectedData: DateCollectionEntry[] | undefined;
+                    if (wantCollected) {
+                      collectedData = await apiGet<DateCollectionEntry[]>(
+                        `/collections/sheet/by-date?date=${encodeURIComponent(pdfDate)}`,
+                      );
+                    }
+
+                    downloadCollectionPdf(visible, formatted, branding.businessName, areaLabel, collectedData);
                     setShowPdfModal(false);
                   } catch {
-                    setPdfError('Unable to load the current business name. Please try again.');
+                    setPdfError('Failed to prepare PDF. Please try again.');
                   } finally {
                     setPdfBusy(false);
                   }

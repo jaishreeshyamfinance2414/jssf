@@ -2,6 +2,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 interface PdfRow {
+  loan_id: string;
   customer_name: string;
   customer_work: string | null;
   customer_mobile: string;
@@ -14,6 +15,14 @@ interface PdfRow {
   received: string;
   remaining: string;
   total_penalty: string;
+}
+
+/** Pre-fetched collection entry for a specific date (keyed by loan_id). */
+export interface DateCollectionEntry {
+  loan_id: string;
+  amount: string;
+  type: string; // full | partial | advance | missed
+  mode: string; // cash | upi | bank
 }
 
 const n = (v: string | number | null | undefined) => Math.round(Number(v ?? 0));
@@ -39,7 +48,29 @@ function formatNameWork(name: string, work: string | null | undefined): string {
   return `${name} (${work})`;
 }
 
-export function downloadCollectionPdf(rows: PdfRow[], dateStr: string, businessName: string) {
+/**
+ * Build the "Amount Given" cell value from collected data.
+ *  - EMI paid (full/partial/advance) + cash → "Amount (C)"  → actually show amount + "(C)"
+ *  - EMI paid + upi/bank → amount + "(B)"
+ *  - missed → "Missed"
+ *  - no entry → ''
+ */
+function amountGivenCell(loanId: string, collectionMap: Map<string, DateCollectionEntry>): string {
+  const entry = collectionMap.get(loanId);
+  if (!entry) return '';
+  if (entry.type === 'missed') return 'Missed';
+  const amt = n(entry.amount);
+  if (entry.mode === 'cash') return `${amt} (C)`;
+  return `${amt} (B)`;
+}
+
+export function downloadCollectionPdf(
+  rows: PdfRow[],
+  dateStr: string,
+  businessName: string,
+  areaLabel: string,
+  collectedData?: DateCollectionEntry[],
+) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pw = 210;
   const mx = 5;
@@ -74,13 +105,34 @@ export function downloadCollectionPdf(rows: PdfRow[], dateStr: string, businessN
     lineHeightFactor: 1.05,
   });
 
-  // Date
+  // Area + Date line
+  const dateLineY = boxY + boxH + 5;
   doc.setFontSize(10);
   doc.setTextColor(0, 0, 0);
+
+  // Left side: Area label
   doc.setFont('helvetica', 'bold');
-  doc.text('Date', mx, boxY + boxH + 5);
+  doc.text('Area:', mx, dateLineY);
   doc.setFont('helvetica', 'normal');
-  doc.text(dateStr, mx + 14, boxY + boxH + 5);
+  doc.text(areaLabel, mx + 12, dateLineY);
+
+  // Right side: Date
+  doc.setFont('helvetica', 'bold');
+  const dateLabelX = pw - mx - doc.getTextWidth(dateStr) - doc.getTextWidth('Date: ');
+  doc.text('Date:', dateLabelX, dateLineY);
+  doc.setFont('helvetica', 'normal');
+  doc.text(dateStr, dateLabelX + doc.getTextWidth('Date: '), dateLineY);
+
+  // Build collection lookup map
+  const collectionMap = new Map<string, DateCollectionEntry>();
+  if (collectedData) {
+    for (const entry of collectedData) {
+      // First entry per loan wins (ordered by entry_date DESC from backend)
+      if (!collectionMap.has(entry.loan_id)) {
+        collectionMap.set(entry.loan_id, entry);
+      }
+    }
+  }
 
   const headers = [
     'S.No.', 'Name', 'Amount\nGiven', 'EMI', 'Tut', 'Today\nBal.',
@@ -91,7 +143,7 @@ export function downloadCollectionPdf(rows: PdfRow[], dateStr: string, businessN
   const body = rows.map((r, i) => [
     i + 1,
     formatNameWork(r.customer_name, r.customer_work),
-    '',
+    collectedData ? amountGivenCell(r.loan_id, collectionMap) : '',
     n(r.emi_amount),
     r.missed_count || '',
     n(r.due_till_today),

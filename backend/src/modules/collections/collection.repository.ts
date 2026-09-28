@@ -82,7 +82,7 @@ export const collectionRepository = {
               l.emi_frequency, l.loan_date::text AS start_date,
               c.full_name AS customer_name, c.mobile AS customer_mobile, c.area_id,
               c.work AS customer_work,
-              a.name AS area_name,
+              a.name AS area_name, a.code AS area_code,
               coverage.missed_count, balance.shortfall::text AS due_till_today,
               dues.expected::text AS expected_till_today,
               coverage.advance_count, balance.advance::text AS advance_amount,
@@ -128,6 +128,25 @@ export const collectionRepository = {
         GROUP BY u.id, u.full_name
         ORDER BY sum(co.amount) DESC`,
       areaIds ? [areaIds] : [],
+    );
+    return rows;
+  },
+
+  /**
+   * Fetch collection entries for a specific date, keyed by loan_id.
+   * Used by the PDF download to pre-fill the "Amount Given" column.
+   */
+  async sheetByDate(dateStr: string, areaIds?: string[]) {
+    const { rows } = await query(
+      `SELECT co.loan_id, co.amount::text, co.type, co.mode
+         FROM collections co
+         JOIN loans l ON l.id = co.loan_id
+         JOIN customers c ON c.id = l.customer_id
+        WHERE (co.entry_date AT TIME ZONE 'Asia/Kolkata')::date = $1::date
+          AND l.status = 'active'
+          ${areaIds ? 'AND c.area_id = ANY($2::uuid[])' : ''}
+        ORDER BY co.entry_date DESC`,
+      areaIds ? [dateStr, areaIds] : [dateStr],
     );
     return rows;
   },

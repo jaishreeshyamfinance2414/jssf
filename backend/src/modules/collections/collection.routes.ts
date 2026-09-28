@@ -14,6 +14,7 @@ router.get('/', requirePermission('collection.view'), asyncHandler(collectionCon
 router.get('/due', requirePermission('collection.view'), asyncHandler(collectionController.due));
 router.get('/sheet', requirePermission('collection.view'), asyncHandler(collectionController.sheet));
 router.get('/sheet/agents', requirePermission('collection.view'), asyncHandler(collectionController.sheetAgents));
+router.get('/sheet/by-date', requirePermission('collection.view'), asyncHandler(collectionController.sheetByDate));
 router.post('/sweep', requireRole('admin'), asyncHandler(collectionController.sweep));
 router.post(
   '/',

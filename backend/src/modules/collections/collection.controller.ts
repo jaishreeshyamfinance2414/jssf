@@ -52,6 +52,12 @@ export const collectionController = {
     return ok(res, await collectionRepository.sheetAgents(areaIds, unassigned));
   },
 
+  async sheetByDate(req: Request, res: Response) {
+    const dateStr = typeof req.query.date === 'string' ? req.query.date : '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) throw BadRequest('Invalid date (expected YYYY-MM-DD)');
+    return ok(res, await collectionRepository.sheetByDate(dateStr, req.areaIds));
+  },
+
   async sweep(_req: Request, res: Response) {
     const result = await sweepMissedEmis();
     return ok(res, result);
