@@ -204,16 +204,19 @@ export function downloadCollectionPdf(
     alternateRowStyles: { fillColor: false },
     columnStyles: {
       0:  { halign: 'center', cellWidth: 9 },       // S.No.
-      1:  { halign: 'left', cellWidth: 32, overflow: 'linebreak' }, // Name (+4)
-      2:  { cellWidth: 18, fontStyle: 'bold' },      // Amount Given (+3)
-      3:  { cellWidth: 13 },                          // EMI (+auto→13)
-      4:  { cellWidth: 10 },                          // Tut (+auto→10)
-      5:  { cellWidth: 14 },                          // Today Bal. (+auto→14)
+      1:  { halign: 'left', cellWidth: 32, overflow: 'linebreak' }, // Name
+      2:  { cellWidth: 15, fontStyle: 'bold' },      // Amount Given
+      3:  { cellWidth: 11 },                          // EMI
+      4:  { cellWidth: 10 },                          // Tut
+      5:  { cellWidth: 14 },                          // Today Bal.
       6:  { cellWidth: 21 },                          // Mobile
-      7:  { cellWidth: 10 },                          // Left (was index 8)
+      7:  { cellWidth: 8 },                           // Left
       8:  { cellWidth: 15 },                          // Start Date
       9:  { cellWidth: 15 },                          // Closing Date
       10: { cellWidth: 14 },                          // Loan Amt
+      11: { cellWidth: 14 },                          // Received
+      12: { cellWidth: 14 },                          // Balance
+      13: { cellWidth: 11 },                          // Penalty
     },
     theme: 'grid',
     margin: { left: mx, right: mx },
