@@ -207,9 +207,9 @@ export function downloadCollectionPdf(
       1:  { halign: 'left', cellWidth: 32, overflow: 'linebreak' }, // Name
       2:  { cellWidth: 15, fontStyle: 'bold' },      // Amount Given
       3:  { cellWidth: 11 },                          // EMI
-      4:  { cellWidth: 10 },                          // Tut
-      5:  { cellWidth: 14 },                          // Today Bal.
-      6:  { cellWidth: 21 },                          // Mobile
+      4:  { cellWidth: 9 },                           // Tut
+      5:  { cellWidth: 13 },                          // Today Bal.
+      6:  { cellWidth: 20 },                          // Mobile
       7:  { cellWidth: 8 },                           // Left
       8:  { cellWidth: 15 },                          // Start Date
       9:  { cellWidth: 15 },                          // Closing Date
