@@ -55,6 +55,7 @@ export default function UsersPage() {
   const qc = useQueryClient();
   const { can, user } = useAuth();
   const [show, setShow] = useState(false);
+  const [createFormValid, setCreateFormValid] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
   const [resetting, setResetting] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState('');
@@ -79,6 +80,7 @@ export default function UsersPage() {
     onSuccess: () => {
       setError(null);
       setShow(false);
+      setCreateFormValid(false);
       invalidate();
     },
     onError: onErr('Unable to create user.'),
@@ -150,7 +152,7 @@ export default function UsersPage() {
             <MonitorSmartphone className="h-4 w-4" /> Active Sessions
           </Button>
           {can('user.create') && (
-            <Button onClick={() => setShow((v) => !v)}><Plus className="h-4 w-4" /> New User</Button>
+            <Button onClick={() => { setCreateFormValid(false); setShow((v) => !v); }}><Plus className="h-4 w-4" /> New User</Button>
           )}
         </div>
       }
@@ -201,17 +203,18 @@ export default function UsersPage() {
           <CardContent>
             <form
               className="grid gap-3 md:grid-cols-3"
+              onInput={(e) => setCreateFormValid(e.currentTarget.checkValidity())}
               onSubmit={(e) => { e.preventDefault(); create.mutate(new FormData(e.currentTarget)); }}
             >
               <Input name="fullName" placeholder="Full name" required />
               <Input name="mobile" placeholder="Mobile" required />
-              <Input name="email" placeholder="Email (optional)" type="email" />
+              <Input name="email" placeholder="Email" type="email" required />
               <Input name="password" placeholder="Password" type="password" required minLength={8} />
               <select name="roleName" className="h-10 rounded-md border bg-background px-3 text-sm" required defaultValue="">
                 <option value="" disabled>Select role</option>
                 {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
-              <Button disabled={create.isPending}>Create User</Button>
+              {createFormValid && <Button disabled={create.isPending}>Create User</Button>}
             </form>
           </CardContent>
         </Card>

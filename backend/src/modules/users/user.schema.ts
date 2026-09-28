@@ -4,7 +4,7 @@ const ROLE_NAMES = ['admin', 'manager', 'collection_agent', 'accounts_dept'] as 
 
 export const createUserSchema = z.object({
   fullName: z.string().min(2),
-  email: z.string().email().optional().nullable(),
+  email: z.string().email(),
   mobile: z.string().min(10).max(15),
   password: z.string().min(8, 'Min 8 characters'),
   roleName: z.enum(ROLE_NAMES),
