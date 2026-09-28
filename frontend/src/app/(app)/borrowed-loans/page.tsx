@@ -26,6 +26,22 @@ interface Payment {
   total_amount: string; account_name: string; installment_no: number | null;
 }
 
+type LoanType = BorrowedLoan['loan_type'];
+interface CreateLoanForm {
+  lenderName: string;
+  loanType: LoanType;
+  receivingAccountId: string;
+  loanAmount: string;
+  receivedDate: string;
+  firstPaymentDate: string;
+  installmentCount: string;
+  installmentAmount: string;
+  interestPaymentAmount: string;
+  financeChargeAmount: string;
+  interestAmount: string;
+  note: string;
+}
+
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
 const nextMonth = () => {
   const [year, month, day] = today().split('-').map(Number);
@@ -34,8 +50,51 @@ const nextMonth = () => {
   value.setUTCDate(Math.min(day, lastDay));
   return value.toISOString().slice(0, 10);
 };
-const errorMessage = (error: unknown, fallback: string) =>
-  (error as AxiosError<{ error?: { message?: string } }>).response?.data?.error?.message ?? fallback;
+interface ApiErrorBody {
+  error?: {
+    message?: string;
+    details?: { formErrors?: string[]; fieldErrors?: Record<string, string[]> };
+  };
+}
+
+const errorMessage = (error: unknown, fallback: string) => {
+  const apiError = (error as AxiosError<ApiErrorBody>).response?.data?.error;
+  const details = [
+    ...(apiError?.details?.formErrors ?? []),
+    ...Object.values(apiError?.details?.fieldErrors ?? {}).flat(),
+  ];
+  return details.length ? [...new Set(details)].join(' · ') : apiError?.message ?? fallback;
+};
+
+const createLoanPayload = (form: CreateLoanForm, defaultAccountId: string) => {
+  const common = {
+    lenderName: form.lenderName,
+    receivingAccountId: form.receivingAccountId || defaultAccountId,
+    loanAmount: Number(form.loanAmount),
+    receivedDate: form.receivedDate,
+    firstPaymentDate: form.firstPaymentDate,
+    note: form.note,
+  };
+  switch (form.loanType) {
+    case 'reducing_balance':
+      return {
+        ...common,
+        loanType: form.loanType,
+        installmentCount: Number(form.installmentCount),
+        installmentAmount: Number(form.installmentAmount),
+      };
+    case 'interest_only':
+      return {
+        ...common,
+        loanType: form.loanType,
+        interestPaymentAmount: Number(form.interestPaymentAmount),
+      };
+    case 'credit_card':
+      return { ...common, loanType: form.loanType, financeChargeAmount: Number(form.financeChargeAmount) };
+    case 'personal_borrowed':
+      return { ...common, loanType: form.loanType, interestAmount: Number(form.interestAmount) };
+  }
+};
 
 export default function BorrowedLoansPage() {
   const qc = useQueryClient();
@@ -48,29 +107,20 @@ export default function BorrowedLoansPage() {
     queryFn: () => apiGet<Payment[]>(`/borrowed-loans/${selectedId}/payments`),
     enabled: !!selectedId,
   });
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<CreateLoanForm>({
     lenderName: '', loanType: 'reducing_balance', receivingAccountId: '', loanAmount: '',
     receivedDate: today(), firstPaymentDate: nextMonth(), installmentCount: '',
-    installmentAmount: '', interestPaymentAmount: '', interestAmount: '', note: '',
+    installmentAmount: '', interestPaymentAmount: '', financeChargeAmount: '', interestAmount: '', note: '',
   });
   const [payment, setPayment] = useState({ accountId: '', paymentDate: today(), principalAmount: '' });
   const [createError, setCreateError] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
 
   const create = useMutation({
-    mutationFn: () => apiPost('/borrowed-loans', {
-      ...form,
-      receivingAccountId: form.receivingAccountId || accounts[0]?.id || '',
-      loanAmount: Number(form.loanAmount),
-      ...(form.loanType === 'reducing_balance'
-        ? { installmentCount: Number(form.installmentCount), installmentAmount: Number(form.installmentAmount) }
-        : form.loanType === 'interest_only'
-          ? { interestPaymentAmount: Number(form.interestPaymentAmount) }
-          : { interestAmount: Number(form.interestAmount) }),
-    }),
+    mutationFn: () => apiPost('/borrowed-loans', createLoanPayload(form, accounts[0]?.id || '')),
     onSuccess: () => {
       setCreateError(null);
-      setForm({ lenderName: '', loanType: 'reducing_balance', receivingAccountId: '', loanAmount: '', receivedDate: today(), firstPaymentDate: nextMonth(), installmentCount: '', installmentAmount: '', interestPaymentAmount: '', interestAmount: '', note: '' });
+      setForm({ lenderName: '', loanType: 'reducing_balance', receivingAccountId: '', loanAmount: '', receivedDate: today(), firstPaymentDate: nextMonth(), installmentCount: '', installmentAmount: '', interestPaymentAmount: '', financeChargeAmount: '', interestAmount: '', note: '' });
       qc.invalidateQueries({ queryKey: ['borrowed-loans'] });
       qc.invalidateQueries({ queryKey: ['accounts'] });
       qc.invalidateQueries({ queryKey: ['dashboard-summary'] });
@@ -97,8 +147,9 @@ export default function BorrowedLoansPage() {
 
   const totalPayable = Number(form.installmentCount || 0) * Number(form.installmentAmount || 0);
   const calculatedInterest = Math.max(0, totalPayable - Number(form.loanAmount || 0));
-  const fixedTotalPayable = Number(form.loanAmount || 0) + Number(form.interestAmount || 0);
   const isFixedRepayment = form.loanType === 'credit_card' || form.loanType === 'personal_borrowed';
+  const fixedInterest = form.loanType === 'credit_card' ? form.financeChargeAmount : form.interestAmount;
+  const fixedTotalPayable = Number(form.loanAmount || 0) + Number(fixedInterest || 0);
   const loanTypeLabel = (type: BorrowedLoan['loan_type']) => ({
     reducing_balance: 'Reducing balance', interest_only: 'Interest only',
     credit_card: 'Credit Card Loan', personal_borrowed: 'Personal Borrowed',
@@ -114,7 +165,7 @@ export default function BorrowedLoansPage() {
         <CardContent className="space-y-3">
           <form className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" onSubmit={(event) => { event.preventDefault(); create.mutate(); }}>
             <Input placeholder="Bank / lender name" value={form.lenderName} onChange={(event) => setForm({ ...form, lenderName: event.target.value })} required />
-            <select className="h-10 rounded-md border bg-background px-3 text-sm" value={form.loanType} onChange={(event) => setForm({ ...form, loanType: event.target.value })}>
+            <select className="h-10 rounded-md border bg-background px-3 text-sm" value={form.loanType} onChange={(event) => setForm({ ...form, loanType: event.target.value as LoanType })}>
               <option value="reducing_balance">Reducing-balance loan</option>
               <option value="interest_only">Interest-only loan</option>
               <option value="credit_card">Credit Card Loan</option>
@@ -131,15 +182,17 @@ export default function BorrowedLoansPage() {
               <Input type="number" min="0.01" step="0.01" placeholder="EMI amount" value={form.installmentAmount} onChange={(event) => setForm({ ...form, installmentAmount: event.target.value })} required />
             </> : form.loanType === 'interest_only'
               ? <Input type="number" min="0.01" step="0.01" placeholder="Monthly interest payment" value={form.interestPaymentAmount} onChange={(event) => setForm({ ...form, interestPaymentAmount: event.target.value })} required />
-              : <Input type="number" min="0" step="0.01" placeholder="Total interest (enter 0 if none)" value={form.interestAmount} onChange={(event) => setForm({ ...form, interestAmount: event.target.value })} required />}
+              : form.loanType === 'credit_card'
+                ? <Input type="number" min="0" step="0.01" placeholder="Total card interest / charges (enter 0 if none)" value={form.financeChargeAmount} onChange={(event) => setForm({ ...form, financeChargeAmount: event.target.value })} required />
+                : <Input type="number" min="0" step="0.01" placeholder="Total agreed interest (enter 0 if none)" value={form.interestAmount} onChange={(event) => setForm({ ...form, interestAmount: event.target.value })} required />}
             <Input placeholder="Note (optional)" value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} />
             <Button disabled={create.isPending || !accounts.length}><Plus className="h-4 w-4" /> Create Loan</Button>
           </form>
           {form.loanType === 'reducing_balance' && !!form.loanAmount && !!form.installmentCount && !!form.installmentAmount && (
             <div className="rounded-md bg-muted px-3 py-2 text-sm">Total payable: <strong>{money(totalPayable)}</strong> · Total interest expense: <strong>{money(calculatedInterest)}</strong></div>
           )}
-          {isFixedRepayment && !!form.loanAmount && form.interestAmount !== '' && (
-            <div className="rounded-md bg-muted px-3 py-2 text-sm">Total payable: <strong>{money(fixedTotalPayable)}</strong> · Principal: <strong>{money(Number(form.loanAmount))}</strong> · Interest: <strong>{money(Number(form.interestAmount))}</strong></div>
+          {isFixedRepayment && !!form.loanAmount && fixedInterest !== '' && (
+            <div className="rounded-md bg-muted px-3 py-2 text-sm">Total payable: <strong>{money(fixedTotalPayable)}</strong> · Principal: <strong>{money(Number(form.loanAmount))}</strong> · {form.loanType === 'credit_card' ? 'Card interest / charges' : 'Interest'}: <strong>{money(Number(fixedInterest))}</strong></div>
           )}
           {createError && <div className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{createError}</div>}
         </CardContent>

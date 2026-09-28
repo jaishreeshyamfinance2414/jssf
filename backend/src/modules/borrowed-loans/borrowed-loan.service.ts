@@ -15,19 +15,93 @@ function addMonths(date: string, months: number): string {
   return target.toISOString().slice(0, 10);
 }
 
+type ScheduleEntry = {
+  installmentNo: number;
+  dueDate: string;
+  principal: number;
+  interest: number;
+  total: number;
+};
+
+type CreationPlan = {
+  installmentCount?: number;
+  installmentAmount?: number;
+  totalPayable?: number;
+  totalInterest: number;
+  periodicInterest?: number;
+  schedule: ScheduleEntry[];
+};
+
+function buildCreationPlan(input: CreateBorrowedLoanBody): CreationPlan {
+  switch (input.loanType) {
+    case 'reducing_balance': {
+      const totalPayable = round2(input.installmentCount * input.installmentAmount);
+      const totalInterest = round2(totalPayable - input.loanAmount);
+      let principalAllocated = 0;
+      const schedule = Array.from({ length: input.installmentCount }, (_, index) => {
+        const isLast = index === input.installmentCount - 1;
+        const principal = isLast
+          ? round2(input.loanAmount - principalAllocated)
+          : round2(input.loanAmount / input.installmentCount);
+        principalAllocated = round2(principalAllocated + principal);
+        return {
+          installmentNo: index + 1,
+          dueDate: addMonths(input.firstPaymentDate, index),
+          principal,
+          interest: round2(input.installmentAmount - principal),
+          total: input.installmentAmount,
+        };
+      });
+      return {
+        installmentCount: input.installmentCount,
+        installmentAmount: input.installmentAmount,
+        totalPayable,
+        totalInterest,
+        schedule,
+      };
+    }
+    case 'interest_only':
+      return {
+        totalInterest: 0,
+        periodicInterest: input.interestPaymentAmount,
+        schedule: [],
+      };
+    case 'credit_card': {
+      const totalInterest = round2(input.financeChargeAmount);
+      const totalPayable = round2(input.loanAmount + totalInterest);
+      return {
+        totalPayable,
+        totalInterest,
+        schedule: [{
+          installmentNo: 1,
+          dueDate: input.firstPaymentDate,
+          principal: input.loanAmount,
+          interest: totalInterest,
+          total: totalPayable,
+        }],
+      };
+    }
+    case 'personal_borrowed': {
+      const totalInterest = round2(input.interestAmount);
+      const totalPayable = round2(input.loanAmount + totalInterest);
+      return {
+        totalPayable,
+        totalInterest,
+        schedule: [{
+          installmentNo: 1,
+          dueDate: input.firstPaymentDate,
+          principal: input.loanAmount,
+          interest: totalInterest,
+          total: totalPayable,
+        }],
+      };
+    }
+  }
+}
+
 export const borrowedLoanService = {
   async create(input: CreateBorrowedLoanBody, actorId: string, ip?: string | null) {
-    const isFixedRepayment = input.loanType === 'credit_card' || input.loanType === 'personal_borrowed';
-    const totalInterest = isFixedRepayment
-      ? round2(input.interestAmount!)
-      : input.loanType === 'reducing_balance'
-        ? round2(input.installmentCount! * input.installmentAmount! - input.loanAmount)
-        : 0;
-    const totalPayable = input.loanType === 'reducing_balance'
-      ? round2(input.installmentCount! * input.installmentAmount!)
-      : isFixedRepayment
-        ? round2(input.loanAmount + totalInterest)
-        : undefined;
+    const plan = buildCreationPlan(input);
 
     return withTransaction(async (client) => {
       const loan = await borrowedLoanRepository.create({
@@ -35,43 +109,19 @@ export const borrowedLoanService = {
         loanType: input.loanType,
         receivingAccountId: input.receivingAccountId,
         loanAmount: input.loanAmount,
-        installmentCount: input.installmentCount,
-        installmentAmount: input.installmentAmount,
-        totalPayable,
-        totalInterest,
-        periodicInterest: input.interestPaymentAmount,
+        installmentCount: plan.installmentCount,
+        installmentAmount: plan.installmentAmount,
+        totalPayable: plan.totalPayable,
+        totalInterest: plan.totalInterest,
+        periodicInterest: plan.periodicInterest,
         receivedDate: input.receivedDate,
         firstPaymentDate: input.firstPaymentDate,
         note: input.note,
         createdBy: actorId,
       }, client);
 
-      if (input.loanType === 'reducing_balance') {
-        let principalAllocated = 0;
-        const schedule = Array.from({ length: input.installmentCount! }, (_, index) => {
-          const isLast = index === input.installmentCount! - 1;
-          const principal = isLast
-            ? round2(input.loanAmount - principalAllocated)
-            : round2(input.loanAmount / input.installmentCount!);
-          principalAllocated = round2(principalAllocated + principal);
-          const interest = round2(input.installmentAmount! - principal);
-          return {
-            installmentNo: index + 1,
-            dueDate: addMonths(input.firstPaymentDate, index),
-            principal,
-            interest,
-            total: input.installmentAmount!,
-          };
-        });
-        await borrowedLoanRepository.createSchedule(loan.id, schedule, client);
-      } else if (isFixedRepayment) {
-        await borrowedLoanRepository.createSchedule(loan.id, [{
-          installmentNo: 1,
-          dueDate: input.firstPaymentDate,
-          principal: input.loanAmount,
-          interest: totalInterest,
-          total: totalPayable!,
-        }], client);
+      if (plan.schedule.length) {
+        await borrowedLoanRepository.createSchedule(loan.id, plan.schedule, client);
       }
 
       await ledgerService.post(client, {
@@ -107,17 +157,37 @@ export const borrowedLoanService = {
       let interest = 0;
       let scheduleId: string | undefined;
 
-      if (loan.loan_type !== 'interest_only') {
-        const schedule = await borrowedLoanRepository.nextSchedule(loanId, client);
-        if (!schedule) throw BadRequest('All EMIs for this loan are already paid');
-        principal = Number(schedule.principal_due);
-        interest = Number(schedule.interest_due);
-        scheduleId = schedule.id;
-      } else {
-        principal = round2(input.principalAmount);
-        interest = Number(loan.periodic_interest);
-        if (principal > outstanding) {
-          throw BadRequest(`Principal payment exceeds outstanding principal of ₹${outstanding.toFixed(2)}`);
+      switch (loan.loan_type) {
+        case 'reducing_balance': {
+          const schedule = await borrowedLoanRepository.nextSchedule(loanId, client);
+          if (!schedule) throw BadRequest('All EMIs for this reducing-balance loan are already paid');
+          principal = Number(schedule.principal_due);
+          interest = Number(schedule.interest_due);
+          scheduleId = schedule.id;
+          break;
+        }
+        case 'interest_only':
+          principal = round2(input.principalAmount);
+          interest = Number(loan.periodic_interest);
+          if (principal > outstanding) {
+            throw BadRequest(`Principal payment exceeds outstanding principal of ₹${outstanding.toFixed(2)}`);
+          }
+          break;
+        case 'credit_card': {
+          const schedule = await borrowedLoanRepository.nextSchedule(loanId, client);
+          if (!schedule) throw BadRequest('This credit-card loan has already been repaid');
+          principal = Number(schedule.principal_due);
+          interest = Number(schedule.interest_due);
+          scheduleId = schedule.id;
+          break;
+        }
+        case 'personal_borrowed': {
+          const schedule = await borrowedLoanRepository.nextSchedule(loanId, client);
+          if (!schedule) throw BadRequest('This personal borrowed loan has already been repaid');
+          principal = Number(schedule.principal_due);
+          interest = Number(schedule.interest_due);
+          scheduleId = schedule.id;
+          break;
         }
       }
 

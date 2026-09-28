@@ -12,7 +12,8 @@
     "seed": "npm run migrate && tsx src/db/seed.ts",
     "sweep": "tsx src/scripts/sweep.ts",
     "passkey": "tsx src/scripts/passkey.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:borrowed-loans": "npm run build && node --test tests/borrowed-loans.test.cjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1092.0",

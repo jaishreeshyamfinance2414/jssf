@@ -3,35 +3,59 @@ import { z } from 'zod';
 const isoDate = z.string().date('A valid date is required');
 const todayInIndia = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
 
-export const createBorrowedLoanSchema = z.object({
+const commonCreateFields = {
   lenderName: z.string().trim().min(2, 'Lender name is required'),
-  loanType: z.enum(['reducing_balance', 'interest_only', 'credit_card', 'personal_borrowed']),
-  receivingAccountId: z.string().uuid(),
+  receivingAccountId: z.string().uuid('A valid receiving account is required'),
   loanAmount: z.coerce.number().positive('Loan amount must be greater than zero'),
   receivedDate: isoDate,
   firstPaymentDate: isoDate,
-  installmentCount: z.coerce.number().int().positive().optional(),
-  installmentAmount: z.coerce.number().positive().optional(),
-  interestPaymentAmount: z.coerce.number().positive().optional(),
-  interestAmount: z.coerce.number().min(0, 'Interest cannot be negative').optional(),
   note: z.string().trim().optional().nullable(),
-}).superRefine((value, ctx) => {
+};
+
+const reducingBalanceLoanSchema = z.object({
+  ...commonCreateFields,
+  loanType: z.literal('reducing_balance'),
+  installmentCount: z.coerce.number().int().positive('Number of EMIs must be greater than zero'),
+  installmentAmount: z.coerce.number().positive('EMI amount must be greater than zero'),
+}).strict();
+
+const interestOnlyLoanSchema = z.object({
+  ...commonCreateFields,
+  loanType: z.literal('interest_only'),
+  interestPaymentAmount: z.coerce.number().positive('Monthly interest amount must be greater than zero'),
+}).strict();
+
+const creditCardLoanSchema = z.object({
+  ...commonCreateFields,
+  loanType: z.literal('credit_card'),
+  financeChargeAmount: z.coerce.number().min(0, 'Credit-card interest and charges cannot be negative'),
+}).strict();
+
+const personalBorrowedLoanSchema = z.object({
+  ...commonCreateFields,
+  loanType: z.literal('personal_borrowed'),
+  interestAmount: z.coerce.number().min(0, 'Interest cannot be negative'),
+}).strict();
+
+export const createBorrowedLoanSchema = z.discriminatedUnion('loanType', [
+  reducingBalanceLoanSchema,
+  interestOnlyLoanSchema,
+  creditCardLoanSchema,
+  personalBorrowedLoanSchema,
+]).superRefine((value, ctx) => {
   if (value.receivedDate > todayInIndia()) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['receivedDate'], message: 'Received date cannot be in the future' });
   }
   if (value.firstPaymentDate < value.receivedDate) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['firstPaymentDate'], message: 'First payment date cannot be before the received date' });
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['firstPaymentDate'], message: 'Payment date cannot be before the received date' });
   }
-  if (value.loanType === 'reducing_balance') {
-    if (!value.installmentCount) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['installmentCount'], message: 'Number of EMIs is required' });
-    if (!value.installmentAmount) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['installmentAmount'], message: 'EMI amount is required' });
-    if (value.installmentCount && value.installmentAmount && value.installmentCount * value.installmentAmount < value.loanAmount) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['installmentAmount'], message: 'Total payable cannot be less than the borrowed amount' });
-    }
-  } else if (value.loanType === 'interest_only' && !value.interestPaymentAmount) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['interestPaymentAmount'], message: 'Monthly interest amount is required' });
-  } else if ((value.loanType === 'credit_card' || value.loanType === 'personal_borrowed') && value.interestAmount == null) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['interestAmount'], message: 'Interest amount is required (enter zero when there is no interest)' });
+  if (value.loanType === 'reducing_balance'
+      && value.installmentCount * value.installmentAmount < value.loanAmount) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['installmentAmount'],
+      message: 'Total payable cannot be less than the borrowed amount',
+    });
   }
 });
 
