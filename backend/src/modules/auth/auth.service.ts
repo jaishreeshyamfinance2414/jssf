@@ -4,6 +4,7 @@ import { env } from '../../config/env';
 import { Locked, Unauthorized } from '../../shared/errors';
 import { audit } from '../audit/audit.service';
 import { authRepository } from './auth.repository';
+import { areaRepository } from '../areas/area.repository';
 import {
   createRefreshToken,
   hashRefreshToken,
@@ -82,11 +83,13 @@ export const authService = {
     // Success — reset counters, issue tokens.
     await authRepository.resetLoginState(user.id);
     const perms = await authRepository.permissionsFor(user.id);
+    const areaIds = await areaRepository.areaIdsForAgent(user.id);
     const accessToken = signAccessToken({
       sub: user.id,
       role: user.role_name,
       perms,
       ...(user.must_change_password ? { pwc: true } : {}),
+      ...(areaIds.length > 0 ? { areaIds } : {}),
     });
 
     const { raw, hash } = createRefreshToken();
@@ -162,11 +165,13 @@ export const authService = {
     // Rotate: revoke the presented token, mint a fresh access + refresh pair.
     await authRepository.revokeRefreshToken(hash);
     const perms = await authRepository.permissionsFor(user.id);
+    const areaIds = await areaRepository.areaIdsForAgent(user.id);
     const accessToken = signAccessToken({
       sub: user.id,
       role: user.role_name,
       perms,
       ...(user.must_change_password ? { pwc: true } : {}),
+      ...(areaIds.length > 0 ? { areaIds } : {}),
     });
 
     // Preserve the session's original lifetime: a "remember me" login keeps its
@@ -241,11 +246,13 @@ export const authService = {
     if (!user || !user.is_active) throw Unauthorized('User unavailable');
 
     const perms = await authRepository.permissionsFor(user.id);
+    const areaIds = await areaRepository.areaIdsForAgent(user.id);
     const accessToken = signAccessToken({
       sub: user.id,
       role: user.role_name,
       perms,
       ...(user.must_change_password ? { pwc: true } : {}),
+      ...(areaIds.length > 0 ? { areaIds } : {}),
     });
     const { raw, hash } = createRefreshToken();
     const refreshExpiresAt = new Date(Date.now() + ms(env.JWT_REFRESH_TTL));

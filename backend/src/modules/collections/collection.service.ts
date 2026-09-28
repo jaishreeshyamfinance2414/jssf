@@ -1,20 +1,30 @@
 import { withTransaction } from '../../db/pool';
+import { PoolClient } from 'pg';
 import { BadRequest } from '../../shared/errors';
 import { accountsRepository } from '../accounts/accounts.repository';
 import { ledgerService } from '../accounts/ledger.service';
 import { agentLedgerRepository } from '../agent-ledger/agent-ledger.repository';
-import { areaRepository } from '../areas/area.repository';
 import { audit } from '../audit/audit.service';
 import { loanRepository } from '../loans/loan.repository';
 import { CreateCollectionBody, UpdateCollectionBody } from './collection.schema';
 import { collectionRepository } from './collection.repository';
 import { reconcileHistoricalPenalties } from './statement-history';
 
+async function requireCustomerArea(client: PoolClient, customerId: string, areaIds?: string[]) {
+  if (!areaIds) return;
+  const { rows } = await client.query(
+    `SELECT 1 FROM customers WHERE id = $1 AND area_id = ANY($2::uuid[])`,
+    [customerId, areaIds],
+  );
+  if (!rows[0]) throw BadRequest('Loan not found');
+}
+
 export const collectionService = {
-  async record(input: CreateCollectionBody, actorId: string, actorRole: string, ip?: string | null) {
+  async record(input: CreateCollectionBody, actorId: string, actorRole: string, ip?: string | null, areaIds?: string[]) {
     return withTransaction(async (client) => {
       const loan = await loanRepository.lockForUpdate(input.loanId, client);
       if (!loan) throw BadRequest('Loan not found');
+      await requireCustomerArea(client, loan.customer_id, areaIds);
       if (loan.status !== 'active') throw BadRequest('Collections can be recorded only for active loans');
       if (input.entryDate && actorRole !== 'admin') {
         throw BadRequest('Only an admin can select a collection entry date and time');
@@ -33,32 +43,6 @@ export const collectionService = {
         [input.entryDate ?? null],
       );
       const collectionDate = businessDates[0].day;
-
-      // Area routing: a collection agent may only record entries for loans of
-      // customers inside their assigned area(s). Admin/manager are exempt.
-      if (actorRole === 'collection_agent') {
-        const myAreas = await areaRepository.areaIdsForAgent(actorId);
-        if (myAreas.length) {
-          const { rows: cust } = await client.query<{ area_id: string | null; area_name: string | null; my_areas: string | null }>(
-            `SELECT c.area_id, a.name AS area_name,
-                    (SELECT string_agg(ar.name, ', ' ORDER BY ar.name)
-                       FROM area_agents aa JOIN areas ar ON ar.id = aa.area_id
-                      WHERE aa.agent_id = $2) AS my_areas
-               FROM customers c
-               LEFT JOIN areas a ON a.id = c.area_id
-              WHERE c.id = $1`,
-            [loan.customer_id, actorId],
-          );
-          const customerArea = cust[0];
-          if (!customerArea?.area_id || !myAreas.includes(customerArea.area_id)) {
-            throw BadRequest(
-              `You cannot make an entry for this loan — it belongs to ${
-                customerArea?.area_name ? `area "${customerArea.area_name}"` : 'a customer with no area'
-              }. You can only make entries in your assigned area${myAreas.length > 1 ? 's' : ''}: ${customerArea?.my_areas ?? '-'}.`,
-            );
-          }
-        }
-      }
 
       // The anchor EMI must belong to this loan — otherwise a crafted emiId
       // could flip/penalize another loan's EMI.
@@ -205,7 +189,7 @@ export const collectionService = {
    * rebuild everything derived from it — EMI fill/status, the cash/bank
    * ledger row, agent handover expectations, and the loan's closed state.
    */
-  async update(id: string, input: UpdateCollectionBody, actorId: string, actorRole: string, ip?: string | null) {
+  async update(id: string, input: UpdateCollectionBody, actorId: string, actorRole: string, ip?: string | null, areaIds?: string[]) {
     return withTransaction(async (client) => {
       const collection = await collectionRepository.findByIdForUpdate(id, client);
       if (!collection) throw BadRequest('Collection entry not found');
@@ -216,6 +200,7 @@ export const collectionService = {
 
       const loan = await loanRepository.lockForUpdate(collection.loan_id, client);
       if (!loan) throw BadRequest('Loan not found');
+      await requireCustomerArea(client, loan.customer_id, areaIds);
       if (loan.closed_by || Number(loan.waiver_amount) > 0) {
         throw BadRequest('This loan was manually closed/settled. Its collection entries cannot be edited.');
       }
@@ -377,7 +362,7 @@ export const collectionService = {
    * automatic full-payment loan closure. Loan "remaining" is computed from
    * SUM(collections.amount), so removing the row restores the balance itself.
    */
-  async remove(id: string, actorId: string, actorRole: string, ip?: string | null) {
+  async remove(id: string, actorId: string, actorRole: string, ip?: string | null, areaIds?: string[]) {
     return withTransaction(async (client) => {
       const collection = await collectionRepository.findByIdForUpdate(id, client);
       if (!collection) throw BadRequest('Collection entry not found');
@@ -389,6 +374,7 @@ export const collectionService = {
       // Serialize with concurrent collection recording on the same loan.
       const loan = await loanRepository.lockForUpdate(collection.loan_id, client);
       if (!loan) throw BadRequest('Loan not found');
+      await requireCustomerArea(client, loan.customer_id, areaIds);
 
       if (loan.closed_by || Number(loan.waiver_amount) > 0) {
         throw BadRequest(

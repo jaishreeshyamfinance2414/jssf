@@ -51,7 +51,7 @@ export const collectionRepository = {
     return Number(rows[0].s);
   },
 
-  async list() {
+  async list(areaIds?: string[]) {
     const { rows } = await query(
       `SELECT co.*, l.loan_number, c.full_name AS customer_name, c.mobile AS customer_mobile,
               COALESCE(agent.full_name, creator.full_name, 'Automatic') AS agent_name,
@@ -63,8 +63,10 @@ export const collectionRepository = {
          JOIN customers c ON c.id = l.customer_id
          LEFT JOIN users agent ON agent.id = co.agent_id
          LEFT JOIN users creator ON creator.id = co.created_by
+         ${areaIds ? 'WHERE c.area_id = ANY($1::uuid[])' : ''}
         ORDER BY co.entry_date DESC
         LIMIT 300`,
+      areaIds ? [areaIds] : [],
     );
     return rows;
   },
@@ -74,7 +76,7 @@ export const collectionRepository = {
    * today's action status — 'done' if any collection entry (cash, bank, or
    * a missed marker) was recorded today for the loan, else 'pending'.
    */
-  async sheet() {
+  async sheet(areaIds?: string[]) {
     const { rows } = await query(
       `SELECT l.id AS loan_id, l.loan_number, l.principal, dues.total_payable, l.emi_amount,
               l.emi_frequency, l.loan_date::text AS start_date,
@@ -100,15 +102,16 @@ export const collectionRepository = {
             ORDER BY co.entry_date DESC
             LIMIT 1
          ) t ON true
-        WHERE l.status = 'active'
+        WHERE l.status = 'active' ${areaIds ? 'AND c.area_id = ANY($1::uuid[])' : ''}
         ORDER BY c.full_name ASC
         LIMIT 500`,
+      areaIds ? [areaIds] : [],
     );
     return rows;
   },
 
   /** Today's collected totals per agent (split by cash / bank), for the collection-sheet footer. */
-  async sheetAgents() {
+  async sheetAgents(areaIds?: string[]) {
     const { rows } = await query(
       `SELECT u.id AS agent_id, u.full_name AS agent_name,
               COALESCE(sum(co.amount), 0)::text AS collected,
@@ -117,14 +120,18 @@ export const collectionRepository = {
               count(*) FILTER (WHERE co.type <> 'missed')::int AS entries
          FROM collections co
          JOIN users u ON u.id = co.agent_id
+         JOIN loans l ON l.id = co.loan_id
+         JOIN customers c ON c.id = l.customer_id
         WHERE (co.entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date
+          ${areaIds ? 'AND c.area_id = ANY($1::uuid[])' : ''}
         GROUP BY u.id, u.full_name
         ORDER BY sum(co.amount) DESC`,
+      areaIds ? [areaIds] : [],
     );
     return rows;
   },
 
-  async todaysDue() {
+  async todaysDue(areaIds?: string[]) {
     // Only EMIs still awaiting action — days already marked 'missed' (by the
     // agent or the sweep) drop off the collection desk; they can still be
     // collected via manual loan search. Each row carries loan-level rollups
@@ -147,9 +154,10 @@ export const collectionRepository = {
           AND e.due_date = COALESCE(coverage.next_due_date,dues.closing_date)
           AND e.due_date <= (now() AT TIME ZONE 'Asia/Kolkata')::date AND balance.shortfall > 0
           AND NOT EXISTS (SELECT 1 FROM collections today WHERE today.loan_id = l.id
-            AND (today.entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date)
+            AND (today.entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date) ${areaIds ? 'AND c.area_id = ANY($1::uuid[])' : ''}
         ORDER BY e.due_date ASC
         LIMIT 300`,
+      areaIds ? [areaIds] : [],
     );
     return rows;
   },

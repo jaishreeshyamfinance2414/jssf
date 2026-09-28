@@ -14,12 +14,12 @@ export const assignAgentSchema = z.object({
 });
 
 export const areaController = {
-  async list(_req: Request, res: Response) {
-    return ok(res, await areaRepository.list());
+  async list(req: Request, res: Response) {
+    return ok(res, await areaRepository.list(req.areaIds));
   },
 
   async agents(req: Request, res: Response) {
-    return ok(res, await areaRepository.agents(req.params.id));
+    return ok(res, await areaRepository.agents(req.params.id, req.areaIds));
   },
 
   async assignAgent(req: Request, res: Response) {

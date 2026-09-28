@@ -23,13 +23,14 @@ export const userController = {
       passwordHash,
       roleName: body.roleName,
       createdBy: req.user!.sub,
+      areaId: body.areaId ?? null,
     });
     await audit({
       actorId: req.user!.sub,
       action: 'CREATE',
       entity: 'user',
       entityId: user.id,
-      meta: { role: body.roleName, mobile: body.mobile },
+      meta: { role: body.roleName, mobile: body.mobile, areaId: body.areaId },
       ip: req.ip,
     });
     return created(res, { id: user.id });
@@ -38,12 +39,13 @@ export const userController = {
   async update(req: Request, res: Response) {
     const body = req.body as UpdateUserBody;
     await userRepository.update(req.params.id, body);
+    if ('areaId' in body || 'roleName' in body) await authRepository.revokeAllForUser(req.params.id);
     await audit({
       actorId: req.user!.sub,
       action: 'UPDATE',
       entity: 'user',
       entityId: req.params.id,
-      meta: { fullName: body.fullName, mobile: body.mobile, roleName: body.roleName },
+      meta: { fullName: body.fullName, mobile: body.mobile, roleName: body.roleName, areaId: body.areaId },
       ip: req.ip,
     });
     return ok(res, { updated: true });

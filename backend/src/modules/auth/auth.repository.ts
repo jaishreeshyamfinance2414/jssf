@@ -14,6 +14,7 @@ export interface UserRow {
   failed_attempts: number;
   locked_until: Date | null;
   must_change_password: boolean;
+  area_id: string | null;
 }
 
 export class AuthRepository extends BaseRepository<UserRow> {

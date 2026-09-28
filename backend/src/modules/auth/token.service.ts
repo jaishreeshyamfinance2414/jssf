@@ -7,6 +7,7 @@ export interface AccessTokenPayload {
   role: string; // role name
   perms: string[]; // permission codes
   pwc?: boolean; // must change password before using the app
+  areaIds?: string[]; // assigned areas for RBAC
 }
 
 export const signAccessToken = (payload: AccessTokenPayload): string =>

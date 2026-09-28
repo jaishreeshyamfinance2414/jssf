@@ -13,11 +13,11 @@ export const customerController = {
     const search = typeof req.query.search === 'string' ? req.query.search : undefined;
     const allowed = ['active', 'deactivated', 'closed_loan', 'all'] as const;
     const status = allowed.find((s) => s === req.query.status) ?? 'active';
-    return ok(res, await customerRepository.list(search, status));
+    return ok(res, await customerRepository.list(search, status, req.areaIds));
   },
 
   async detail(req: Request, res: Response) {
-    const customer = await customerRepository.findById(req.params.id);
+    const customer = await customerRepository.findById(req.params.id, req.areaIds);
     if (!customer) throw NotFound('Customer not found');
     const loans = await customerRepository.loanHistory(req.params.id);
     return ok(res, { ...customer, loans });
@@ -39,12 +39,18 @@ export const customerController = {
 
   async create(req: Request, res: Response) {
     const body = req.body as CreateCustomerBody;
+    if (req.areaIds && (!body.areaId || !req.areaIds.includes(body.areaId))) throw Forbidden('You can only create customers in your assigned area');
     const customer = await customerService.create(body, req.user!.sub, req.ip);
     return created(res, customer);
   },
 
   async update(req: Request, res: Response) {
     const body = req.body as UpdateCustomerBody;
+    if (req.areaIds && body.areaId && !req.areaIds.includes(body.areaId)) {
+      throw Forbidden('Cannot move customer outside your area');
+    }
+    const existing = await customerRepository.findById(req.params.id, req.areaIds);
+    if (!existing) throw NotFound('Customer not found');
     if (body.createdAt !== undefined && req.user!.role !== 'admin') {
       throw Forbidden('Only an admin can change the customer Created date');
     }
@@ -54,6 +60,8 @@ export const customerController = {
   },
 
   async delete(req: Request, res: Response) {
+    const existing = await customerRepository.findById(req.params.id, req.areaIds);
+    if (!existing) throw NotFound('Customer not found');
     return gateOrExecute(req, res, {
       actionType: 'customer.delete',
       entityType: 'customer',
@@ -64,10 +72,14 @@ export const customerController = {
   },
 
   async deactivate(req: Request, res: Response) {
+    const existing = await customerRepository.findById(req.params.id, req.areaIds);
+    if (!existing) throw NotFound('Customer not found');
     return ok(res, await customerService.deactivate(req.params.id, req.user!.sub, req.ip));
   },
 
   async activate(req: Request, res: Response) {
+    const existing = await customerRepository.findById(req.params.id, req.areaIds);
+    if (!existing) throw NotFound('Customer not found');
     return ok(res, await customerService.activate(req.params.id, req.user!.sub, req.ip));
   },
 };

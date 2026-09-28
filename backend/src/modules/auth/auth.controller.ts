@@ -4,6 +4,7 @@ import { ok } from '../../shared/http';
 import { Unauthorized } from '../../shared/errors';
 import { authService } from './auth.service';
 import { authRepository } from './auth.repository';
+import { areaRepository } from '../areas/area.repository';
 
 const REFRESH_COOKIE = 'jssf_rt';
 
@@ -58,6 +59,7 @@ export const authController = {
     if (!req.user) throw Unauthorized();
     const user = await authRepository.findByIdWithRole(req.user.sub);
     if (!user) throw Unauthorized();
+    const areaIds = await areaRepository.areaIdsForAgent(req.user.sub);
     return ok(res, {
       id: user.id,
       fullName: user.full_name,
@@ -66,6 +68,7 @@ export const authController = {
       role: user.role_name,
       permissions: req.user.perms,
       mustChangePassword: user.must_change_password,
+      areaIds,
     });
   },
 

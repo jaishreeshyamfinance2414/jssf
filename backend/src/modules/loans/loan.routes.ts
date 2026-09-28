@@ -2,12 +2,14 @@ import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
 import { authenticate, requirePermission } from '../../middleware/auth';
 import { requirePasskey } from '../../middleware/passkey';
+import { scopeByArea } from '../../middleware/area-scope';
 import { validate } from '../../middleware/validate';
 import { loanController } from './loan.controller';
 import { closeLoanSchema, createLoanSchema, disburseLoanSchema, rejectLoanSchema, updateLoanSchema } from './loan.schema';
 
 const router = Router();
 router.use(authenticate);
+router.use(scopeByArea());
 
 router.get('/', requirePermission('loan.view'), asyncHandler(loanController.list));
 router.get('/search', requirePermission('loan.view'), asyncHandler(loanController.search));

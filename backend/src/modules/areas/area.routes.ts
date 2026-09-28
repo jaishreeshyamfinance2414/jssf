@@ -2,11 +2,13 @@ import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
 import { authenticate, requirePermission } from '../../middleware/auth';
 import { requirePasskey } from '../../middleware/passkey';
+import { scopeByArea } from '../../middleware/area-scope';
 import { validate } from '../../middleware/validate';
 import { areaController, assignAgentSchema, createAreaSchema } from './area.controller';
 
 const router = Router();
 router.use(authenticate);
+router.use(scopeByArea());
 
 router.get('/', requirePermission('area.view'), asyncHandler(areaController.list));
 router.post(

@@ -8,6 +8,15 @@ export const createUserSchema = z.object({
   mobile: z.string().min(10).max(15),
   password: z.string().min(8, 'Min 8 characters'),
   roleName: z.enum(ROLE_NAMES),
+  areaId: z.string().uuid().optional().nullable(),
+}).superRefine((data, ctx) => {
+  if (data.roleName !== 'admin' && data.roleName !== 'manager' && !data.areaId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['areaId'],
+      message: 'Area is mandatory for this role',
+    });
+  }
 });
 
 export const updateUserSchema = z.object({
@@ -15,6 +24,7 @@ export const updateUserSchema = z.object({
   email: z.string().email().optional().nullable(),
   mobile: z.string().min(10).max(15).optional(),
   roleName: z.enum(ROLE_NAMES).optional(),
+  areaId: z.string().uuid().optional().nullable(),
 });
 
 export const resetPasswordSchema = z.object({

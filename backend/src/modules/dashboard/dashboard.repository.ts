@@ -6,28 +6,32 @@ import { loanBalanceJoin } from '../loans/loan-balance';
  * Each is a single indexed query; the controller runs them concurrently.
  */
 export const dashboardRepository = {
-  async totalCustomers(): Promise<number> {
+  async totalCustomers(areaIds?: string[]): Promise<number> {
     const { rows } = await query<{ c: string }>(
-      `SELECT count(*)::text AS c FROM customers WHERE is_active = true`,
+      `SELECT count(*)::text AS c FROM customers WHERE is_active = true ${areaIds ? 'AND area_id = ANY($1::uuid[])' : ''}`,
+      areaIds ? [areaIds] : [],
     );
     return Number(rows[0].c);
   },
 
-  async activeLoans(): Promise<number> {
+  async activeLoans(areaIds?: string[]): Promise<number> {
     const { rows } = await query<{ c: string }>(
-      `SELECT count(*)::text AS c FROM loans WHERE status = 'active'`,
+      `SELECT count(*)::text AS c FROM loans l JOIN customers c ON c.id = l.customer_id WHERE l.status = 'active' ${areaIds ? 'AND c.area_id = ANY($1::uuid[])' : ''}`,
+      areaIds ? [areaIds] : [],
     );
     return Number(rows[0].c);
   },
 
-  async todaysCollection(): Promise<{ cash: number; digital: number; total: number; previousTotal: number }> {
+  async todaysCollection(areaIds?: string[]): Promise<{ cash: number; digital: number; total: number; previousTotal: number }> {
     const { rows } = await query<{ cash: string; digital: string; prev: string }>(
       `SELECT
-         COALESCE(sum(amount) FILTER (WHERE mode = 'cash' AND (entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date), 0)::text AS cash,
-         COALESCE(sum(amount) FILTER (WHERE mode != 'cash' AND (entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date), 0)::text AS digital,
-         COALESCE(sum(amount) FILTER (WHERE (entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date - 1), 0)::text AS prev
-         FROM collections
-        WHERE (entry_date AT TIME ZONE 'Asia/Kolkata')::date IN ((now() AT TIME ZONE 'Asia/Kolkata')::date, (now() AT TIME ZONE 'Asia/Kolkata')::date - 1)`,
+         COALESCE(sum(co.amount) FILTER (WHERE co.mode = 'cash' AND (co.entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date), 0)::text AS cash,
+         COALESCE(sum(co.amount) FILTER (WHERE co.mode != 'cash' AND (co.entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date), 0)::text AS digital,
+         COALESCE(sum(co.amount) FILTER (WHERE (co.entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date - 1), 0)::text AS prev
+         FROM collections co JOIN loans l ON l.id = co.loan_id JOIN customers c ON c.id = l.customer_id
+        WHERE (co.entry_date AT TIME ZONE 'Asia/Kolkata')::date IN ((now() AT TIME ZONE 'Asia/Kolkata')::date, (now() AT TIME ZONE 'Asia/Kolkata')::date - 1)
+          ${areaIds ? 'AND c.area_id = ANY($1::uuid[])' : ''}`,
+      areaIds ? [areaIds] : [],
     );
     const cash = Number(rows[0].cash);
     const digital = Number(rows[0].digital);
@@ -49,61 +53,68 @@ export const dashboardRepository = {
   },
 
   /** Overdue installments: total unpaid amount + how many distinct areas they span. */
-  async missedEmiSummary(): Promise<{ amount: number; areas: number }> {
+  async missedEmiSummary(areaIds?: string[]): Promise<{ amount: number; areas: number }> {
     const { rows } = await query<{ amount: string; areas: string }>(
       `SELECT COALESCE(sum(balance.overdue), 0)::text AS amount,
               count(DISTINCT c.area_id)::text AS areas
          FROM loans l
          JOIN customers c ON c.id = l.customer_id
          ${loanBalanceJoin}
-        WHERE l.status = 'active' AND balance.overdue > 0`,
+        WHERE l.status = 'active' AND balance.overdue > 0
+          ${areaIds ? 'AND c.area_id = ANY($1::uuid[])' : ''}`,
+      areaIds ? [areaIds] : [],
     );
     return { amount: Number(rows[0].amount), areas: Number(rows[0].areas) };
   },
 
   /** Remaining principal-plus-interest across all active loans. */
-  async outstandingPrincipal(): Promise<number> {
+  async outstandingPrincipal(areaIds?: string[]): Promise<number> {
     const { rows } = await query<{ s: string }>(
       `SELECT COALESCE(sum(balance.remaining), 0)::text AS s
-         FROM loans l
+         FROM loans l JOIN customers c ON c.id = l.customer_id
          ${loanBalanceJoin}
-        WHERE l.status = 'active'`,
+        WHERE l.status = 'active' ${areaIds ? 'AND c.area_id = ANY($1::uuid[])' : ''}`,
+      areaIds ? [areaIds] : [],
     );
     return Number(rows[0].s);
   },
 
-  async newCustomersThisMonth(): Promise<number> {
+  async newCustomersThisMonth(areaIds?: string[]): Promise<number> {
     const { rows } = await query<{ c: string }>(
       `SELECT count(*)::text AS c FROM customers
         WHERE is_active = true
-          AND date_trunc('month', created_at) = date_trunc('month', CURRENT_DATE)`,
+          AND date_trunc('month', created_at) = date_trunc('month', CURRENT_DATE) ${areaIds ? 'AND area_id = ANY($1::uuid[])' : ''}`,
+      areaIds ? [areaIds] : [],
     );
     return Number(rows[0].c);
   },
 
-  async pendingApprovalsValue(): Promise<number> {
+  async pendingApprovalsValue(areaIds?: string[]): Promise<number> {
     const { rows } = await query<{ s: string }>(
-      `SELECT COALESCE(sum(principal), 0)::text AS s FROM loans WHERE status = 'pending'`,
+      `SELECT COALESCE(sum(principal), 0)::text AS s FROM loans l JOIN customers c ON c.id = l.customer_id WHERE l.status = 'pending' ${areaIds ? 'AND c.area_id = ANY($1::uuid[])' : ''}`,
+      areaIds ? [areaIds] : [],
     );
     return Number(rows[0].s);
   },
 
   /** Distinct loans carrying an overdue EMI, and the penalty accrued on them. */
-  async overdueLoans(): Promise<{ count: number; penalty: number }> {
+  async overdueLoans(areaIds?: string[]): Promise<{ count: number; penalty: number }> {
     const { rows } = await query<{ c: string; penalty: string }>(
       `SELECT count(*)::text AS c, COALESCE(sum(dues.penalty),0)::text AS penalty
-         FROM loans l ${loanBalanceJoin}
-        WHERE l.status = 'active' AND balance.overdue > 0`,
+         FROM loans l JOIN customers c ON c.id = l.customer_id ${loanBalanceJoin}
+        WHERE l.status = 'active' AND balance.overdue > 0 ${areaIds ? 'AND c.area_id = ANY($1::uuid[])' : ''}`,
+      areaIds ? [areaIds] : [],
     );
     return { count: Number(rows[0].c), penalty: Number(rows[0].penalty) };
   },
 
-  async disbursedThisMonth(): Promise<{ amount: number; count: number }> {
+  async disbursedThisMonth(areaIds?: string[]): Promise<{ amount: number; count: number }> {
     const { rows } = await query<{ amount: string; c: string }>(
       `SELECT COALESCE(sum(principal), 0)::text AS amount, count(*)::text AS c
-         FROM loans
-        WHERE disbursed_at IS NOT NULL
-          AND date_trunc('month', disbursed_at) = date_trunc('month', CURRENT_DATE)`,
+         FROM loans l JOIN customers c ON c.id = l.customer_id
+        WHERE l.disbursed_at IS NOT NULL
+          AND date_trunc('month', l.disbursed_at) = date_trunc('month', CURRENT_DATE) ${areaIds ? 'AND c.area_id = ANY($1::uuid[])' : ''}`,
+      areaIds ? [areaIds] : [],
     );
     return { amount: Number(rows[0].amount), count: Number(rows[0].c) };
   },
@@ -121,7 +132,7 @@ export const dashboardRepository = {
   },
 
   /** Top pending loan applications for the dashboard approvals table. */
-  async pendingLoanApprovals(): Promise<
+  async pendingLoanApprovals(areaIds?: string[]): Promise<
     Array<{ id: string; loanNumber: string; customerName: string; area: string; amount: number; sequenceNo: number }>
   > {
     const { rows } = await query<{
@@ -137,9 +148,10 @@ export const dashboardRepository = {
          FROM loans l
          JOIN customers c ON c.id = l.customer_id
          LEFT JOIN areas a ON a.id = c.area_id
-        WHERE l.status = 'pending'
+        WHERE l.status = 'pending' ${areaIds ? 'AND c.area_id = ANY($1::uuid[])' : ''}
         ORDER BY l.created_at DESC
         LIMIT 5`,
+      areaIds ? [areaIds] : [],
     );
     return rows.map((r) => ({
       id: r.id,
@@ -152,7 +164,7 @@ export const dashboardRepository = {
   },
 
   /** Recent audit events for the activity feed. */
-  async recentActivity(): Promise<
+  async recentActivity(areaIds?: string[]): Promise<
     Array<{ id: string; action: string; entity: string; actorName: string; meta: Record<string, unknown> | null; createdAt: string }>
   > {
     const { rows } = await query<{
@@ -166,8 +178,13 @@ export const dashboardRepository = {
       `SELECT al.id, al.action, al.entity, u.full_name AS actor_name, al.meta, al.created_at
          FROM audit_logs al
          LEFT JOIN users u ON u.id = al.actor_id
+        ${areaIds ? `WHERE
+          (al.entity = 'customer' AND EXISTS (SELECT 1 FROM customers c WHERE c.id::text = al.entity_id AND c.area_id = ANY($1::uuid[])))
+          OR (al.entity = 'loan' AND EXISTS (SELECT 1 FROM loans l JOIN customers c ON c.id = l.customer_id WHERE l.id::text = al.entity_id AND c.area_id = ANY($1::uuid[])))
+          OR (al.entity = 'collection' AND EXISTS (SELECT 1 FROM collections co JOIN loans l ON l.id = co.loan_id JOIN customers c ON c.id = l.customer_id WHERE co.id::text = al.entity_id AND c.area_id = ANY($1::uuid[])))` : ''}
         ORDER BY al.created_at DESC
         LIMIT 6`,
+      areaIds ? [areaIds] : [],
     );
     return rows.map((r) => ({
       id: r.id,
@@ -179,25 +196,28 @@ export const dashboardRepository = {
     }));
   },
 
-  async todaysDue(): Promise<number> {
+  async todaysDue(areaIds?: string[]): Promise<number> {
     const { rows } = await query<{ s: string }>(
       `SELECT COALESCE(sum(balance.shortfall - balance.overdue),0)::text AS s
-         FROM loans l ${loanBalanceJoin} WHERE l.status = 'active'`,
+         FROM loans l JOIN customers c ON c.id = l.customer_id ${loanBalanceJoin} WHERE l.status = 'active' ${areaIds ? 'AND c.area_id = ANY($1::uuid[])' : ''}`,
+      areaIds ? [areaIds] : [],
     );
     return Number(rows[0].s);
   },
 
-  async todaysMissed(): Promise<number> {
+  async todaysMissed(areaIds?: string[]): Promise<number> {
     const { rows } = await query<{ c: string }>(
       `SELECT COALESCE(sum(coverage.missed_count),0)::text AS c
-         FROM loans l ${loanBalanceJoin} WHERE l.status = 'active'`,
+         FROM loans l JOIN customers c ON c.id = l.customer_id ${loanBalanceJoin} WHERE l.status = 'active' ${areaIds ? 'AND c.area_id = ANY($1::uuid[])' : ''}`,
+      areaIds ? [areaIds] : [],
     );
     return Number(rows[0].c);
   },
 
-  async pendingApprovals(): Promise<number> {
+  async pendingApprovals(areaIds?: string[]): Promise<number> {
     const { rows } = await query<{ c: string }>(
-      `SELECT count(*)::text AS c FROM loans WHERE status = 'pending'`,
+      `SELECT count(*)::text AS c FROM loans l JOIN customers c ON c.id = l.customer_id WHERE l.status = 'pending' ${areaIds ? 'AND c.area_id = ANY($1::uuid[])' : ''}`,
+      areaIds ? [areaIds] : [],
     );
     return Number(rows[0].c);
   },
@@ -230,7 +250,7 @@ export const dashboardRepository = {
     return Number(rows[0].s);
   },
 
-  async borrowedLoanSummary(): Promise<{
+  async borrowedLoanSummary(_areaIds?: string[]): Promise<{
     originalBorrowed: number; outstandingPrincipal: number; principalRepaid: number;
     interestPaid: number; overduePayments: number;
   }> {
@@ -269,7 +289,7 @@ export const dashboardRepository = {
     };
   },
 
-  async borrowedLoanReminders(): Promise<Array<{
+  async borrowedLoanReminders(_areaIds?: string[]): Promise<Array<{
     loanId: string; lenderName: string; loanType: string; paymentDate: string; amount: number;
     principal: number; interest: number; overdue: boolean;
   }>> {
@@ -310,20 +330,21 @@ export const dashboardRepository = {
     }));
   },
 
-  async areaWiseCollection(): Promise<Array<{ area: string; amount: number }>> {
+  async areaWiseCollection(areaIds?: string[]): Promise<Array<{ area: string; amount: number }>> {
     const { rows } = await query<{ area: string; amount: string }>(
       `SELECT COALESCE(a.name,'Unassigned') AS area, sum(c.amount)::text AS amount
          FROM collections c
          JOIN loans l ON l.id = c.loan_id
          JOIN customers cu ON cu.id = l.customer_id
          LEFT JOIN areas a ON a.id = COALESCE(c.area_id, cu.area_id)
-        WHERE (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date
+        WHERE (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date ${areaIds ? 'AND cu.area_id = ANY($1::uuid[])' : ''}
         GROUP BY a.name ORDER BY sum(c.amount) DESC`,
+      areaIds ? [areaIds] : [],
     );
     return rows.map((r) => ({ area: r.area, amount: Number(r.amount) }));
   },
 
-  async agentWiseCollection(): Promise<
+  async agentWiseCollection(areaIds?: string[]): Promise<
     Array<{ agentId: string | null; agent: string; area: string; amount: number; shortAmount: number }>
   > {
     const { rows } = await query<{
@@ -342,10 +363,11 @@ export const dashboardRepository = {
               sum(c.amount)::text AS amount,
               COALESCE((SELECT sum(short_amount) FROM agent_ledger al
                          WHERE al.agent_id = c.agent_id AND al.ledger_date = CURRENT_DATE), 0)::text AS short_amount
-         FROM collections c LEFT JOIN users u ON u.id = c.agent_id
-        WHERE (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date
+         FROM collections c LEFT JOIN users u ON u.id = c.agent_id JOIN loans l ON l.id = c.loan_id JOIN customers cu ON cu.id = l.customer_id
+        WHERE (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date ${areaIds ? 'AND cu.area_id = ANY($1::uuid[])' : ''}
         GROUP BY c.agent_id, u.full_name
         ORDER BY sum(c.amount) DESC`,
+      areaIds ? [areaIds] : [],
     );
     return rows.map((r) => ({
       agentId: r.agent_id,
@@ -357,15 +379,16 @@ export const dashboardRepository = {
   },
 
   /** Last 30 days of collected vs due, for the dashboard trend chart (client slices 7/14/30). */
-  async collectionTrend(): Promise<Array<{ date: string; amount: number; due: number }>> {
+  async collectionTrend(areaIds?: string[]): Promise<Array<{ date: string; amount: number; due: number }>> {
     const { rows } = await query<{ date: string; amount: string; due: string }>(
       `SELECT d::date::text AS date,
-              COALESCE((SELECT sum(amount) FROM collections
-                         WHERE (entry_date AT TIME ZONE 'Asia/Kolkata')::date = d::date),0)::text AS amount,
-              COALESCE((SELECT sum(due_amount) FROM emi_schedule
-                         WHERE due_date = d::date),0)::text AS due
+              COALESCE((SELECT sum(amount) FROM collections col JOIN loans l ON l.id = col.loan_id JOIN customers cu ON cu.id = l.customer_id
+                         WHERE (col.entry_date AT TIME ZONE 'Asia/Kolkata')::date = d::date ${areaIds ? 'AND cu.area_id = ANY($1::uuid[])' : ''}),0)::text AS amount,
+              COALESCE((SELECT sum(due_amount) FROM emi_schedule e JOIN loans l2 ON l2.id = e.loan_id JOIN customers cu2 ON cu2.id = l2.customer_id
+                         WHERE e.due_date = d::date ${areaIds ? 'AND cu2.area_id = ANY($1::uuid[])' : ''}),0)::text AS due
          FROM generate_series(CURRENT_DATE - INTERVAL '29 days', CURRENT_DATE, '1 day') d
         ORDER BY d`,
+      areaIds ? [areaIds] : [],
     );
     return rows.map((r) => ({ date: r.date, amount: Number(r.amount), due: Number(r.due) }));
   },

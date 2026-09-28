@@ -31,27 +31,27 @@ export const dashboardController = {
       pendingLoanApprovals,
       recentActivity,
     ] = await Promise.all([
-      r.totalCustomers(),
-      r.activeLoans(),
-      r.todaysCollection(),
-      r.todaysDue(),
-      r.todaysMissed(),
-      r.pendingApprovals(),
+      r.totalCustomers(req.areaIds),
+      r.activeLoans(req.areaIds),
+      r.todaysCollection(req.areaIds),
+      r.todaysDue(req.areaIds),
+      r.todaysMissed(req.areaIds),
+      r.pendingApprovals(req.areaIds),
       r.availableCash(),
       r.totalExpenses(),
-      r.areaWiseCollection(),
-      r.agentWiseCollection(),
-      r.collectionTrend(),
+      r.areaWiseCollection(req.areaIds),
+      r.agentWiseCollection(req.areaIds),
+      r.collectionTrend(req.areaIds),
       r.cashSplit(),
-      r.missedEmiSummary(),
-      r.outstandingPrincipal(),
-      r.newCustomersThisMonth(),
-      r.pendingApprovalsValue(),
-      r.overdueLoans(),
-      r.disbursedThisMonth(),
+      r.missedEmiSummary(req.areaIds),
+      r.outstandingPrincipal(req.areaIds),
+      r.newCustomersThisMonth(req.areaIds),
+      r.pendingApprovalsValue(req.areaIds),
+      r.overdueLoans(req.areaIds),
+      r.disbursedThisMonth(req.areaIds),
       r.salaryExpenseThisMonth(),
-      r.pendingLoanApprovals(),
-      r.recentActivity(),
+      r.pendingLoanApprovals(req.areaIds),
+      r.recentActivity(req.areaIds),
     ]);
 
     const base = {
@@ -85,7 +85,7 @@ export const dashboardController = {
 
     if (ADMIN_LIKE.includes(req.user!.role)) {
       const [byAgent, dueByAgent, borrowedLoans, borrowedLoanReminders] = await Promise.all([
-        al.pendingByAgent(), al.lifetimeDueByAgent(), r.borrowedLoanSummary(), r.borrowedLoanReminders(),
+        al.pendingByAgent(), al.lifetimeDueByAgent(), r.borrowedLoanSummary(req.areaIds), r.borrowedLoanReminders(req.areaIds),
       ]);
       const dueMap = new Map(dueByAgent.map((d) => [d.agentId, d.dueAmount]));
       return ok(res, {

@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
 import { authenticate, requirePermission, requireRole } from '../../middleware/auth';
+import { scopeByArea } from '../../middleware/area-scope';
 import { validate } from '../../middleware/validate';
 import { collectionController } from './collection.controller';
 import { createCollectionSchema, updateCollectionSchema } from './collection.schema';
 
 const router = Router();
 router.use(authenticate);
+router.use(scopeByArea());
 
 router.get('/', requirePermission('collection.view'), asyncHandler(collectionController.list));
 router.get('/due', requirePermission('collection.view'), asyncHandler(collectionController.due));

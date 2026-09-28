@@ -107,7 +107,7 @@ export const loanRepository = {
     return rows[0] ?? null;
   },
 
-  async list(status?: LoanStatus) {
+  async list(status?: LoanStatus, areaIds?: string[]) {
     const { rows } = await query(
       `SELECT l.id, l.loan_number, l.principal, l.interest_rate, l.status, l.emi_frequency, l.tenure_count,
               l.emi_amount, dues.total_payable, l.loan_date, l.closed_at, l.waiver_amount, l.created_at,
@@ -115,15 +115,15 @@ export const loanRepository = {
               balance.remaining::text, dues.closing_date::text
          FROM loans l JOIN customers c ON c.id = l.customer_id
          ${loanBalanceJoin}
-        WHERE ($1::loan_status IS NULL OR l.status = $1)
+        WHERE ($1::loan_status IS NULL OR l.status = $1) ${areaIds ? 'AND c.area_id = ANY($2::uuid[])' : ''}
         ORDER BY l.created_at DESC
         LIMIT 300`,
-      [status ?? null],
+      areaIds ? [status ?? null, areaIds] : [status ?? null],
     );
     return rows;
   },
 
-  async searchActive(term: string) {
+  async searchActive(term: string, areaIds?: string[]) {
     const normalized = term.trim();
     if (normalized.length < 2) return [];
     const numeric = Number(normalized.replace(/,/g, ''));
@@ -153,7 +153,7 @@ export const loanRepository = {
          FROM loans l
          JOIN customers c ON c.id = l.customer_id
          ${loanBalanceJoin}
-        WHERE l.status = 'active'
+        WHERE l.status = 'active' ${areaIds ? 'AND c.area_id = ANY($3::uuid[])' : ''}
           AND (
             c.full_name ILIKE '%' || $1 || '%'
             OR c.mobile ILIKE '%' || $1 || '%'
@@ -165,7 +165,7 @@ export const loanRepository = {
           )
         ORDER BY l.created_at DESC
         LIMIT 20`,
-      [normalized, Number.isFinite(numeric) ? numeric : null],
+      areaIds ? [normalized, Number.isFinite(numeric) ? numeric : null, areaIds] : [normalized, Number.isFinite(numeric) ? numeric : null],
     );
     return rows;
   },

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
 import { authenticate, requirePermission } from '../../middleware/auth';
 import { requirePasskey } from '../../middleware/passkey';
+import { scopeByArea } from '../../middleware/area-scope';
 import { validate } from '../../middleware/validate';
 import { uploadTo, storeUploadedFiles } from '../files/upload';
 import {
@@ -14,6 +15,7 @@ import { customerController } from './customer.controller';
 
 const router = Router();
 router.use(authenticate);
+router.use(scopeByArea());
 
 const upload = uploadTo('customers');
 const stageUpload = uploadTo('staging');

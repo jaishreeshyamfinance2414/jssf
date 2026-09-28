@@ -3,6 +3,8 @@ import { asyncHandler } from '../../shared/http';
 import { authenticate, requirePermission } from '../../middleware/auth';
 import { NotFound } from '../../shared/errors';
 import { getObject } from './r2';
+import { scopeByArea } from '../../middleware/area-scope';
+import { query } from '../../db/pool';
 
 const router = Router();
 
@@ -19,12 +21,27 @@ const SEGMENT = /^[A-Za-z0-9._-]+$/;
 router.get(
   '/:category/:filename',
   authenticate,
+  scopeByArea(),
   requirePermission('customer.view'),
   asyncHandler(async (req, res) => {
     const { category, filename } = req.params;
     if (!SEGMENT.test(category) || !SEGMENT.test(filename)) throw NotFound('File not found');
 
-    const object = await getObject(`${category}/${filename}`);
+    const key = `${category}/${filename}`;
+    if (req.areaIds) {
+      const { rows } = await query(
+        `SELECT 1 FROM customers c
+          WHERE c.area_id = ANY($1::uuid[])
+            AND $2 = ANY(ARRAY[c.photo_path, c.aadhaar_path, c.pan_path, c.signature_path,
+                               c.guarantor_photo_path, c.guarantor_aadhaar_path,
+                               c.guarantor_pan_path, c.guarantor_signature_path,
+                               c.electricity_bill_path])`,
+        [req.areaIds, key],
+      );
+      if (!rows[0]) throw NotFound('File not found');
+    }
+
+    const object = await getObject(key);
     if (!object) throw NotFound('File not found');
 
     // Defense-in-depth against stored XSS: never let the browser execute an

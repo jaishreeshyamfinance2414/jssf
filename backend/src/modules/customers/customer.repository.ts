@@ -183,7 +183,7 @@ export const customerRepository = {
    * Rows include active_loan_count and total_loan_count so the UI can decide
    * which of Delete / Deactivate / Activate applies to each customer.
    */
-  async list(search?: string, status: 'active' | 'deactivated' | 'closed_loan' | 'all' = 'active') {
+  async list(search?: string, status: 'active' | 'deactivated' | 'closed_loan' | 'all' = 'active', areaIds?: string[]) {
     const statusFilter =
       status === 'active'
         ? 'c.is_active = true'
@@ -203,17 +203,18 @@ export const customerRepository = {
         WHERE ${statusFilter}
           AND ($1::text IS NULL OR c.full_name ILIKE '%'||$1||'%' OR c.mobile ILIKE '%'||$1||'%'
                OR c.file_number::text = $1)
+          ${areaIds ? 'AND c.area_id = ANY($2::uuid[])' : ''}
         ORDER BY c.created_at DESC
         LIMIT 200`,
-      [search ?? null],
+      areaIds ? [search ?? null, areaIds] : [search ?? null],
     );
     return rows;
   },
 
-  async findById(id: string) {
+  async findById(id: string, areaIds?: string[]) {
     const { rows } = await query(
-      `SELECT c.*, a.name AS area_name FROM customers c LEFT JOIN areas a ON a.id = c.area_id WHERE c.id = $1`,
-      [id],
+      `SELECT c.*, a.name AS area_name FROM customers c LEFT JOIN areas a ON a.id = c.area_id WHERE c.id = $1 ${areaIds ? 'AND c.area_id = ANY($2::uuid[])' : ''}`,
+      areaIds ? [id, areaIds] : [id],
     );
     return rows[0] ?? null;
   },

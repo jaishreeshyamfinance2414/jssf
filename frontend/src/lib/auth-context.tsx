@@ -10,6 +10,7 @@ export interface AuthUser {
   mobile: string;
   role: string;
   permissions: string[];
+  areaIds?: string[];
   mustChangePassword?: boolean;
 }
 

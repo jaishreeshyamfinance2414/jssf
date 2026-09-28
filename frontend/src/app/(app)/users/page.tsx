@@ -1,9 +1,9 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
-import { KeyRound, Lock, MonitorSmartphone, Plus, UserCheck, UserX, XCircle } from 'lucide-react';
+import { KeyRound, Lock, MapPin, MonitorSmartphone, Plus, UserCheck, UserX, XCircle } from 'lucide-react';
 import { api, apiDelete, apiGet, apiPut } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { dateTime } from '@/lib/format';
@@ -23,7 +23,11 @@ interface User {
   is_active: boolean;
   locked_until: string | null;
   created_at: string;
+  area_id: string | null;
+  area_name: string | null;
 }
+
+interface Area { id: string; name: string; code: string | null; }
 
 const ROLES = [
   { value: 'admin', label: 'Admin' },
@@ -55,13 +59,18 @@ export default function UsersPage() {
   const qc = useQueryClient();
   const { can, user } = useAuth();
   const [show, setShow] = useState(false);
+  const [createRole, setCreateRole] = useState('');
+  const [createArea, setCreateArea] = useState('');
   const [createFormValid, setCreateFormValid] = useState(false);
+  const createFormRef = useRef<HTMLFormElement>(null);
   const [editing, setEditing] = useState<User | null>(null);
+  const [editRole, setEditRole] = useState('');
   const [resetting, setResetting] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [showSessions, setShowSessions] = useState(false);
   const { data = [] } = useQuery({ queryKey: ['users'], queryFn: () => apiGet<User[]>('/users') });
+  const { data: areas = [] } = useQuery({ queryKey: ['areas'], queryFn: () => apiGet<Area[]>('/areas') });
   const { data: sessions = [] } = useQuery({
     queryKey: ['user-sessions'],
     queryFn: () => apiGet<Session[]>('/users/sessions'),
@@ -70,6 +79,9 @@ export default function UsersPage() {
   });
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['users'] });
+  useEffect(() => {
+    setCreateFormValid(createFormRef.current?.checkValidity() ?? false);
+  }, [createRole, createArea]);
   const onErr = (fallback: string) => (err: unknown) => {
     const ax = err as AxiosError<{ error?: { message?: string } }>;
     setError(ax.response?.data?.error?.message ?? fallback);
@@ -81,6 +93,8 @@ export default function UsersPage() {
       setError(null);
       setShow(false);
       setCreateFormValid(false);
+      setCreateRole('');
+      setCreateArea('');
       invalidate();
     },
     onError: onErr('Unable to create user.'),
@@ -152,7 +166,7 @@ export default function UsersPage() {
             <MonitorSmartphone className="h-4 w-4" /> Active Sessions
           </Button>
           {can('user.create') && (
-            <Button onClick={() => { setCreateFormValid(false); setShow((v) => !v); }}><Plus className="h-4 w-4" /> New User</Button>
+            <Button onClick={() => { setCreateFormValid(false); setCreateRole(''); setCreateArea(''); setShow((v) => !v); }}><Plus className="h-4 w-4" /> New User</Button>
           )}
         </div>
       }
@@ -202,6 +216,7 @@ export default function UsersPage() {
           <CardHeader><CardTitle>Create User</CardTitle></CardHeader>
           <CardContent>
             <form
+              ref={createFormRef}
               className="grid gap-3 md:grid-cols-3"
               onInput={(e) => setCreateFormValid(e.currentTarget.checkValidity())}
               onSubmit={(e) => { e.preventDefault(); create.mutate(new FormData(e.currentTarget)); }}
@@ -210,11 +225,15 @@ export default function UsersPage() {
               <Input name="mobile" placeholder="Mobile" required />
               <Input name="email" placeholder="Email" type="email" required />
               <Input name="password" placeholder="Password" type="password" required minLength={8} />
-              <select name="roleName" className="h-10 rounded-md border bg-background px-3 text-sm" required defaultValue="">
+              <select name="roleName" className="h-10 rounded-md border bg-background px-3 text-sm" required value={createRole} onChange={(e) => setCreateRole(e.target.value)}>
                 <option value="" disabled>Select role</option>
                 {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
-              {createFormValid && <Button disabled={create.isPending}>Create User</Button>}
+              <select name="areaId" className="h-10 rounded-md border bg-background px-3 text-sm" required={createRole === 'collection_agent' || createRole === 'accounts_dept'} value={createArea} onChange={(e) => setCreateArea(e.target.value)}>
+                <option value="" disabled={createRole === 'collection_agent' || createRole === 'accounts_dept'}>{(createRole === 'collection_agent' || createRole === 'accounts_dept') ? "Select area *" : "(Optional) Select area"}</option>
+                {areas.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <Button disabled={!createFormValid || create.isPending}>Create User</Button>
             </form>
           </CardContent>
         </Card>
@@ -232,8 +251,12 @@ export default function UsersPage() {
               <Input name="fullName" defaultValue={editing.full_name} placeholder="Full name" required />
               <Input name="mobile" defaultValue={editing.mobile} placeholder="Mobile" required />
               <Input name="email" defaultValue={editing.email ?? ''} placeholder="Email" type="email" />
-              <select name="roleName" className="h-10 rounded-md border bg-background px-3 text-sm" defaultValue={editing.role_name}>
+              <select name="roleName" className="h-10 rounded-md border bg-background px-3 text-sm" value={editRole} onChange={(e) => setEditRole(e.target.value)}>
                 {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+              <select name="areaId" className="h-10 rounded-md border bg-background px-3 text-sm" required={editRole === 'collection_agent' || editRole === 'accounts_dept'} defaultValue={editing.area_id ?? ''}>
+                <option value="" disabled={editRole === 'collection_agent' || editRole === 'accounts_dept'}>{(editRole === 'collection_agent' || editRole === 'accounts_dept') ? "Select area *" : "(Optional) Select area"}</option>
+                {areas.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
               <div className="flex gap-2">
                 <Button disabled={update.isPending}>Save</Button>
@@ -269,17 +292,18 @@ export default function UsersPage() {
       )}
 
       <DataTable
-        columns={['Name', 'Mobile', 'Email', 'Role', 'Status', 'Created', 'Action']}
+        columns={['Name', 'Mobile', 'Email', 'Role', 'Area', 'Status', 'Created', 'Action']}
         rows={data.map((u) => [
           u.full_name,
           u.mobile,
           u.email ?? '-',
           ROLES.find((r) => r.value === u.role_name)?.label ?? u.role_name,
+          u.area_name ?? 'All Areas',
           <StatusPill key={u.id} value={u.is_active ? 'active' : 'closed'} />,
           dateTime(u.created_at),
           <div key={`${u.id}-actions`} className="flex flex-wrap gap-2">
             {can('user.update') && (
-              <Button size="sm" variant="outline" onClick={() => setEditing(u)}>Edit</Button>
+              <Button size="sm" variant="outline" onClick={() => { setEditing(u); setEditRole(u.role_name); }}>Edit</Button>
             )}
             {can('user.update') && (
               <Button size="sm" variant="outline" onClick={() => { setResetting(u); setNewPassword(''); }}>
