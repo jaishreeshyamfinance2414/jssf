@@ -19,7 +19,7 @@ export const salaryRepository = {
   async members() {
     const { rows } = await query(
       `SELECT u.id AS user_id, u.full_name AS staff_name, r.name AS role_name,
-              ms.monthly_salary::text, ms.payment_day, ms.salary_date,
+              ms.monthly_salary::text, ms.payment_day, cycle.upcoming_salary_date AS salary_date,
               COALESCE(pending.total, 0)::text AS upcoming_expense_deduct,
               CASE WHEN ms.monthly_salary IS NULL THEN NULL
                    ELSE GREATEST(ms.monthly_salary - COALESCE(pending.total, 0), 0)::text
@@ -29,13 +29,40 @@ export const salaryRepository = {
          JOIN roles r ON r.id = u.role_id
          LEFT JOIN member_salaries ms ON ms.user_id = u.id
          LEFT JOIN LATERAL (
+           SELECT date_trunc('month', CURRENT_DATE)::date AS month_start
+         ) calendar ON true
+         LEFT JOIN LATERAL (
+           SELECT (
+             calendar.month_start
+             + (LEAST(ms.payment_day, EXTRACT(day FROM (calendar.month_start + interval '1 month - 1 day'))::int) - 1) * interval '1 day'
+           )::date AS current_salary_date
+         ) current_schedule ON true
+         LEFT JOIN LATERAL (
+           SELECT CASE
+             WHEN ms.salary_date >= CURRENT_DATE THEN ms.salary_date
+             WHEN CURRENT_DATE <= current_schedule.current_salary_date THEN current_schedule.current_salary_date
+             ELSE (
+               calendar.month_start + interval '1 month'
+               + (LEAST(ms.payment_day, EXTRACT(day FROM (calendar.month_start + interval '2 months - 1 day'))::int) - 1) * interval '1 day'
+             )::date
+           END AS upcoming_salary_date
+         ) upcoming ON true
+         LEFT JOIN LATERAL (
+           SELECT upcoming.upcoming_salary_date,
+                  (
+                    date_trunc('month', upcoming.upcoming_salary_date) - interval '1 month'
+                    + (LEAST(ms.payment_day, EXTRACT(day FROM (date_trunc('month', upcoming.upcoming_salary_date) - interval '1 day'))::int) - 1) * interval '1 day'
+                  )::date AS last_salary_date
+         ) cycle ON true
+         LEFT JOIN LATERAL (
            SELECT sum(item.remaining) AS total
              FROM (
                SELECT e.amount - COALESCE(sum(a.amount), 0) AS remaining
                  FROM expenses e
-                 LEFT JOIN salary_expense_allocations a ON a.expense_id = e.id
+                LEFT JOIN salary_expense_allocations a ON a.expense_id = e.id
                 WHERE e.user_id = u.id
-                  AND e.expense_date < date_trunc('month', ms.salary_date)
+                  AND e.expense_date >= cycle.last_salary_date
+                  AND e.expense_date < cycle.upcoming_salary_date
                 GROUP BY e.id
                HAVING e.amount - COALESCE(sum(a.amount), 0) > 0
              ) item
@@ -100,19 +127,20 @@ export const salaryRepository = {
     return rows[0] ?? null;
   },
 
-  async pendingExpenses(userId: string, year: number, month: number, client?: PoolClient) {
+  async pendingExpenses(userId: string, afterDate: string, throughDate: string, client?: PoolClient) {
     const sql =
       `SELECT e.id, (e.amount - COALESCE(sum(a.amount), 0))::text AS remaining
          FROM expenses e
-         LEFT JOIN salary_expense_allocations a ON a.expense_id = e.id
+        LEFT JOIN salary_expense_allocations a ON a.expense_id = e.id
         WHERE e.user_id = $1
-          AND e.expense_date < make_date($2, $3, 1)
+          AND e.expense_date >= $2::date
+          AND e.expense_date < $3::date
         GROUP BY e.id
        HAVING e.amount - COALESCE(sum(a.amount), 0) > 0
         ORDER BY e.expense_date, e.created_at`;
     const { rows } = client
-      ? await client.query<{ id: string; remaining: string }>(sql, [userId, year, month])
-      : await query<{ id: string; remaining: string }>(sql, [userId, year, month]);
+      ? await client.query<{ id: string; remaining: string }>(sql, [userId, afterDate, throughDate])
+      : await query<{ id: string; remaining: string }>(sql, [userId, afterDate, throughDate]);
     return rows;
   },
 

@@ -29,7 +29,10 @@ interface Salary {
   final_salary: string; mode: string; paid_at: string; note: string | null;
 }
 
-interface Payable { baseSalary: number; pendingExpense: number; expenseDeduct: number; finalSalary: number }
+interface Payable {
+  baseSalary: number; pendingExpense: number; expenseDeduct: number; finalSalary: number;
+  lastSalaryDate: string; upcomingSalaryDate: string;
+}
 interface PersonalExpense {
   user_id: string; staff_name: string; role_name: string; expense_month: string;
   expense_count: number; total_expense: string;
@@ -188,7 +191,7 @@ export default function SalaryPage() {
               <Input type="date" value={payForm.paidDate} onChange={(event) => setPayForm({ ...payForm, paidDate: event.target.value })} required />
               <Input className="md:col-span-2" placeholder="Note (optional)" value={payForm.note} onChange={(event) => setPayForm({ ...payForm, note: event.target.value })} />
               {payableError && <div className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger md:col-span-3">{(payableError as AxiosError<{ error?: { message?: string } }>).response?.data?.error?.message ?? 'Unable to calculate salary.'}</div>}
-              {payable && <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm md:col-span-3">Base: <b>{money(payable.baseSalary)}</b> · User expense deduction: <b className="text-danger">-{money(payable.expenseDeduct)}</b>{payable.pendingExpense > payable.expenseDeduct && <> · Carry forward: <b>{money(payable.pendingExpense - payable.expenseDeduct)}</b></>} · Payable: <b>{money(payable.finalSalary)}</b></div>}
+              {payable && <div className="grid gap-2 rounded-lg border bg-muted/30 p-3 text-sm md:col-span-3 sm:grid-cols-3"><div><span className="block text-xs text-muted-foreground">Salary cycle</span><b>{date(payable.lastSalaryDate)} → {date(payable.upcomingSalaryDate)}</b></div><div><span className="block text-xs text-muted-foreground">Personal expenses</span><b className="text-danger">-{money(payable.expenseDeduct)}</b></div><div><span className="block text-xs text-muted-foreground">Exact salary to pay</span><b className="text-emerald-700 dark:text-emerald-300">{money(payable.finalSalary)}</b></div></div>}
               <Button className="md:col-span-3" disabled={pay.isPending || !payable}>Record Salary Payment</Button>
             </form>
           </CardContent>
@@ -197,17 +200,17 @@ export default function SalaryPage() {
 
       <Card>
           <CardHeader className="border-b bg-primary/5"><CardTitle className="text-lg">Active Members</CardTitle><p className="text-sm text-muted-foreground">Fixed monthly salary compared with the exact amount remaining to pay.</p></CardHeader>
-          <CardContent>
+          <CardContent className="pt-6">
           <DataTable
             columns={['Member', 'Role', 'Monthly Salary', 'Upcoming Salary', 'Salary Giving Date', 'Last Paid On', 'Actions']}
             rows={members.map((member) => [
               member.staff_name,
               <StatusPill key={`${member.user_id}-role`} value={member.role_name} />,
-              member.monthly_salary ? <div key={`${member.user_id}-fixed`} className="inline-flex min-w-28 flex-col rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-900 dark:bg-blue-950/40"><span className="text-[10px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">Fixed salary</span><span className="text-base font-bold text-blue-900 dark:text-blue-100">{money(member.monthly_salary)}</span></div> : <span className="font-medium text-muted-foreground">Not configured</span>,
+              member.monthly_salary ? <div key={`${member.user_id}-fixed`} className="inline-flex h-14 min-w-28 flex-col justify-center whitespace-nowrap rounded-lg border border-blue-200 bg-blue-50 px-3 dark:border-blue-900 dark:bg-blue-950/40"><span className="text-[10px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">Fixed salary</span><span className="text-base font-bold text-blue-900 dark:text-blue-100">{money(member.monthly_salary)}</span></div> : <span className="font-medium text-muted-foreground">Not configured</span>,
               member.monthly_salary ? <UpcomingSalary key={`${member.user_id}-upcoming`} member={member} /> : '-',
               member.salary_date ? date(member.salary_date) : '-',
               member.last_paid_at ? date(member.last_paid_at) : '-',
-              can('salary.manage') ? <div key={`${member.user_id}-actions`} className="flex gap-2"><Button size="sm" variant="outline" onClick={() => editMember(member)}>{member.monthly_salary ? 'Edit Salary' : 'Add Salary'}</Button>{member.monthly_salary && <Button size="sm" onClick={() => openPay(member)}>Pay Salary</Button>}</div> : '-',
+              can('salary.manage') ? <div key={`${member.user_id}-actions`} className="flex flex-nowrap gap-2 whitespace-nowrap"><Button size="sm" variant="outline" onClick={() => editMember(member)}>{member.monthly_salary ? 'Edit' : 'Add Salary'}</Button>{member.monthly_salary && <Button size="sm" onClick={() => openPay(member)}>Pay</Button>}</div> : '-',
             ])}
             rowClassNames={members.map((member) => Number(member.upcoming_expense_deduct) > 0 ? 'bg-amber-50/40 dark:bg-amber-950/10' : '')}
             empty="No active users"
@@ -272,12 +275,9 @@ function UpcomingSalary({ member }: { member: Member }) {
       ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100'
       : 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100';
   return (
-    <div className={`min-w-52 rounded-lg border px-3 py-2 ${tone}`}>
+    <div className={`flex h-14 min-w-48 flex-col justify-center whitespace-nowrap rounded-lg border px-3 ${tone}`}>
       <div className="text-[10px] font-semibold uppercase tracking-wide opacity-75">Exact remaining to pay</div>
-      <div className="text-lg font-extrabold">{money(remaining)}</div>
-      <div className="mt-0.5 text-xs font-medium">
-        {deduction > 0 ? `Already took ${money(deduction)} · Salary reduced to ${money(remaining)}` : 'No personal deductions · Full salary payable'}
-      </div>
+      <div className="flex items-baseline gap-2"><span className="text-lg font-extrabold">{money(remaining)}</span><span className="text-[11px] font-medium opacity-75">{deduction > 0 ? `after -${money(deduction)}` : 'full payable'}</span></div>
     </div>
   );
 }

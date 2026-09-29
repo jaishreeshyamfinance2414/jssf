@@ -6,6 +6,17 @@ import { audit } from '../audit/audit.service';
 import { CreateSalaryBody } from './salary.schema';
 import { salaryRepository } from './salary.repository';
 
+function salaryCycle(year: number, month: number, paymentDay: number) {
+  const scheduledMonth = new Date(Date.UTC(year, month - 1, 1));
+  const previousMonth = new Date(Date.UTC(year, month - 2, 1));
+  const formatScheduledDate = (value: Date) => {
+    const lastDay = new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth() + 1, 0)).getUTCDate();
+    return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), Math.min(paymentDay, lastDay)))
+      .toISOString().slice(0, 10);
+  };
+  return { lastSalaryDate: formatScheduledDate(previousMonth), upcomingSalaryDate: formatScheduledDate(scheduledMonth) };
+}
+
 export const salaryService = {
   async upsertMember(input: { userId: string; monthlySalary: number; salaryDate: string }, actorId: string, ip?: string | null) {
     const member = await salaryRepository.upsertMember({ ...input, createdBy: actorId });
@@ -20,7 +31,8 @@ export const salaryService = {
     const baseSalary = Number(member.monthly_salary);
     const otherDeductions = input.cashShortDeduct + input.advanceDeduct;
     if (otherDeductions > baseSalary) throw BadRequest('Deductions exceed the monthly salary.');
-    const pending = await salaryRepository.pendingExpenses(input.userId, input.periodYear, input.periodMonth);
+    const cycle = salaryCycle(input.periodYear, input.periodMonth, member.payment_day);
+    const pending = await salaryRepository.pendingExpenses(input.userId, cycle.lastSalaryDate, cycle.upcomingSalaryDate);
     const pendingExpense = pending.reduce((sum, expense) => sum + Number(expense.remaining), 0);
     const expenseDeduct = Math.min(pendingExpense, baseSalary - otherDeductions);
     return {
@@ -28,6 +40,7 @@ export const salaryService = {
       pendingExpense: Number(pendingExpense.toFixed(2)),
       expenseDeduct: Number(expenseDeduct.toFixed(2)),
       finalSalary: Number((baseSalary - otherDeductions - expenseDeduct).toFixed(2)),
+      ...cycle,
     };
   },
 
@@ -41,7 +54,8 @@ export const salaryService = {
       const baseSalary = Number(member.monthly_salary);
       const otherDeductions = input.cashShortDeduct + input.advanceDeduct;
       if (otherDeductions > baseSalary) throw BadRequest('Deductions exceed the monthly salary.');
-      const pending = await salaryRepository.pendingExpenses(input.userId, input.periodYear, input.periodMonth, client);
+      const cycle = salaryCycle(input.periodYear, input.periodMonth, member.payment_day);
+      const pending = await salaryRepository.pendingExpenses(input.userId, cycle.lastSalaryDate, cycle.upcomingSalaryDate, client);
       const pendingExpense = pending.reduce((sum, expense) => sum + Number(expense.remaining), 0);
       const expenseDeduct = Number(Math.min(pendingExpense, baseSalary - otherDeductions).toFixed(2));
       const finalSalary = Number((baseSalary - otherDeductions - expenseDeduct).toFixed(2));
@@ -72,7 +86,7 @@ export const salaryService = {
           action: 'CREATE',
           entity: 'salary',
           entityId: salary.id,
-          meta: { userId: input.userId, period: `${input.periodMonth}/${input.periodYear}`, baseSalary, expenseDeduct, finalSalary, mode: input.mode },
+          meta: { userId: input.userId, period: `${input.periodMonth}/${input.periodYear}`, ...cycle, baseSalary, expenseDeduct, finalSalary, mode: input.mode },
           ip,
         },
         client,
