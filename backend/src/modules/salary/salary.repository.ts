@@ -24,8 +24,7 @@ export const salaryRepository = {
               CASE WHEN ms.monthly_salary IS NULL THEN NULL
                    ELSE GREATEST(ms.monthly_salary - COALESCE(pending.total, 0), 0)::text
               END AS upcoming_payable,
-              last_pay.paid_at AS last_paid_at, last_pay.final_salary::text AS last_paid_amount,
-              last_pay.period_year AS last_paid_year, last_pay.period_month AS last_paid_month
+              last_pay.paid_at AS last_paid_at
          FROM users u
          JOIN roles r ON r.id = u.role_id
          LEFT JOIN member_salaries ms ON ms.user_id = u.id
@@ -42,7 +41,7 @@ export const salaryRepository = {
              ) item
          ) pending ON true
          LEFT JOIN LATERAL (
-           SELECT s.paid_at, s.final_salary, s.period_year, s.period_month
+           SELECT s.paid_at
              FROM salaries s WHERE s.user_id = u.id
             ORDER BY s.period_year DESC, s.period_month DESC LIMIT 1
          ) last_pay ON true

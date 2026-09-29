@@ -19,8 +19,7 @@ interface Member {
   monthly_salary: string | null; payment_day: number | null;
   salary_date: string | null;
   upcoming_expense_deduct: string; upcoming_payable: string | null;
-  last_paid_at: string | null; last_paid_amount: string | null;
-  last_paid_year: number | null; last_paid_month: number | null;
+  last_paid_at: string | null;
 }
 
 interface Salary {
@@ -145,10 +144,10 @@ export default function SalaryPage() {
     >
       {error && <div className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Metric label="Active Members" value={String(members.length)} />
-        <Metric label={`Paid — ${MONTHS[now.getMonth()]}`} value={money(thisMonthPaid)} />
-        <Metric label="Total Paid" value={money(totalPaid)} />
-        <Metric label="Total Deductions" value={money(totalDeductions)} />
+        <Metric label="Active Members" value={String(members.length)} tone="blue" />
+        <Metric label={`Paid — ${MONTHS[now.getMonth()]}`} value={money(thisMonthPaid)} tone="green" />
+        <Metric label="Total Paid" value={money(totalPaid)} tone="violet" />
+        <Metric label="Total Deductions" value={money(totalDeductions)} tone="red" />
       </div>
 
       {showMember && (
@@ -197,32 +196,27 @@ export default function SalaryPage() {
       )}
 
       <Card>
-        <CardHeader><CardTitle>Active Members</CardTitle></CardHeader>
-        <CardContent>
+          <CardHeader className="border-b bg-primary/5"><CardTitle className="text-lg">Active Members</CardTitle><p className="text-sm text-muted-foreground">Fixed monthly salary compared with the exact amount remaining to pay.</p></CardHeader>
+          <CardContent>
           <DataTable
-            columns={['Member', 'Role', 'Monthly Salary', 'Upcoming Salary', 'Salary Giving Date', 'Last Salary Period', 'Last Paid On', 'Last Paid', 'Actions']}
+            columns={['Member', 'Role', 'Monthly Salary', 'Upcoming Salary', 'Salary Giving Date', 'Last Paid On', 'Actions']}
             rows={members.map((member) => [
               member.staff_name,
               <StatusPill key={`${member.user_id}-role`} value={member.role_name} />,
-              member.monthly_salary ? money(member.monthly_salary) : 'Not configured',
-              member.monthly_salary ? (
-                Number(member.upcoming_expense_deduct) > 0
-                  ? <div key={`${member.user_id}-upcoming`}><div className="font-semibold">{money(member.upcoming_payable ?? 0)}</div><div className="text-xs text-danger">Already took {money(member.upcoming_expense_deduct)}; hence upcoming salary becomes {money(member.upcoming_payable ?? 0)}.</div></div>
-                  : <span key={`${member.user_id}-upcoming`}>{money(member.upcoming_payable ?? member.monthly_salary)}</span>
-              ) : '-',
+              member.monthly_salary ? <div key={`${member.user_id}-fixed`} className="inline-flex min-w-28 flex-col rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-900 dark:bg-blue-950/40"><span className="text-[10px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">Fixed salary</span><span className="text-base font-bold text-blue-900 dark:text-blue-100">{money(member.monthly_salary)}</span></div> : <span className="font-medium text-muted-foreground">Not configured</span>,
+              member.monthly_salary ? <UpcomingSalary key={`${member.user_id}-upcoming`} member={member} /> : '-',
               member.salary_date ? date(member.salary_date) : '-',
-              member.last_paid_month ? `${MONTHS[member.last_paid_month - 1]} ${member.last_paid_year}` : '-',
               member.last_paid_at ? date(member.last_paid_at) : '-',
-              member.last_paid_amount ? money(member.last_paid_amount) : '-',
               can('salary.manage') ? <div key={`${member.user_id}-actions`} className="flex gap-2"><Button size="sm" variant="outline" onClick={() => editMember(member)}>{member.monthly_salary ? 'Edit Salary' : 'Add Salary'}</Button>{member.monthly_salary && <Button size="sm" onClick={() => openPay(member)}>Pay Salary</Button>}</div> : '-',
             ])}
+            rowClassNames={members.map((member) => Number(member.upcoming_expense_deduct) > 0 ? 'bg-amber-50/40 dark:bg-amber-950/10' : '')}
             empty="No active users"
           />
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>Monthly Personal Expenses</CardTitle></CardHeader>
+        <CardHeader className="border-b bg-amber-50 dark:bg-amber-950/20"><CardTitle className="text-lg text-amber-900 dark:text-amber-100">Monthly Personal Expenses</CardTitle><p className="text-sm text-amber-800/80 dark:text-amber-200/70">Money already taken by each member, including the admin/owner.</p></CardHeader>
         <CardContent>
           <DataTable
             columns={['Member', 'Role', 'Month', 'Transactions', 'Personal Expense']}
@@ -231,7 +225,7 @@ export default function SalaryPage() {
               <StatusPill key={`${expense.user_id}-${expense.expense_month}-role`} value={expense.role_name} />,
               monthLabel(expense.expense_month),
               String(expense.expense_count),
-              <span key={`${expense.user_id}-${expense.expense_month}-amount`} className="font-semibold text-danger">{money(expense.total_expense)}</span>,
+              <span key={`${expense.user_id}-${expense.expense_month}-amount`} className="inline-flex rounded-full bg-red-100 px-3 py-1 font-bold text-red-700 dark:bg-red-950/50 dark:text-red-300">{money(expense.total_expense)}</span>,
             ])}
             empty="No personal expenses recorded"
           />
@@ -254,8 +248,11 @@ export default function SalaryPage() {
         columns={['Staff', 'Role', 'Period', 'Base', 'Shortage', 'Advance', 'User Expense', 'Final Paid', 'Mode', 'Paid On', 'Note', 'Action']}
         rows={visibleSalaries.map((salary) => [
           salary.staff_name, <StatusPill key={`${salary.id}-role`} value={salary.role_name} />, `${MONTHS[salary.period_month - 1]} ${salary.period_year}`,
-          money(salary.base_salary), money(salary.cash_short_deduct), money(salary.advance_deduct), money(salary.expense_deduct),
-          <b key={`${salary.id}-final`}>{money(salary.final_salary)}</b>,
+          <span key={`${salary.id}-base`} className="font-semibold text-blue-700 dark:text-blue-300">{money(salary.base_salary)}</span>,
+          Number(salary.cash_short_deduct) ? <span key={`${salary.id}-short`} className="text-red-600">-{money(salary.cash_short_deduct)}</span> : '-',
+          Number(salary.advance_deduct) ? <span key={`${salary.id}-advance`} className="text-red-600">-{money(salary.advance_deduct)}</span> : '-',
+          Number(salary.expense_deduct) ? <span key={`${salary.id}-expense`} className="text-red-600">-{money(salary.expense_deduct)}</span> : '-',
+          <span key={`${salary.id}-final`} className="inline-flex rounded-full bg-emerald-100 px-3 py-1 font-bold text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">{money(salary.final_salary)}</span>,
           salary.mode === 'cash' ? 'Cash' : 'UPI/Bank', date(salary.paid_at), salary.note ?? '-',
           can('salary.manage') ? <Button key={salary.id} size="sm" variant="danger" disabled={remove.isPending} onClick={() => { if (confirm(`Delete salary payment for ${salary.staff_name}?`)) remove.mutate(salary.id); }}><Trash2 className="h-4 w-4" /> Delete</Button> : '-',
         ])}
@@ -265,6 +262,33 @@ export default function SalaryPage() {
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-md border bg-muted/30 p-3"><div className="text-xs text-muted-foreground">{label}</div><div className="mt-1 text-lg font-semibold">{value}</div></div>;
+function UpcomingSalary({ member }: { member: Member }) {
+  const deduction = Number(member.upcoming_expense_deduct);
+  const remaining = Number(member.upcoming_payable ?? member.monthly_salary ?? 0);
+  const isZero = remaining === 0;
+  const tone = isZero
+    ? 'border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-100'
+    : deduction > 0
+      ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100'
+      : 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100';
+  return (
+    <div className={`min-w-52 rounded-lg border px-3 py-2 ${tone}`}>
+      <div className="text-[10px] font-semibold uppercase tracking-wide opacity-75">Exact remaining to pay</div>
+      <div className="text-lg font-extrabold">{money(remaining)}</div>
+      <div className="mt-0.5 text-xs font-medium">
+        {deduction > 0 ? `Already took ${money(deduction)} · Salary reduced to ${money(remaining)}` : 'No personal deductions · Full salary payable'}
+      </div>
+    </div>
+  );
+}
+
+const metricTones = {
+  blue: 'border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-100',
+  green: 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100',
+  violet: 'border-violet-200 bg-violet-50 text-violet-900 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-100',
+  red: 'border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-100',
+};
+
+function Metric({ label, value, tone }: { label: string; value: string; tone: keyof typeof metricTones }) {
+  return <div className={`rounded-xl border p-4 shadow-sm ${metricTones[tone]}`}><div className="text-xs font-semibold uppercase tracking-wide opacity-70">{label}</div><div className="mt-1 text-xl font-extrabold">{value}</div></div>;
 }
