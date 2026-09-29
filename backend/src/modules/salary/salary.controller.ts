@@ -12,6 +12,10 @@ export const salaryController = {
     return ok(res, await salaryRepository.members());
   },
 
+  async userExpenses(_req: Request, res: Response) {
+    return ok(res, await salaryRepository.userExpenses());
+  },
+
   async payable(req: Request, res: Response) {
     return ok(res, await salaryService.payable(req.query as any));
   },

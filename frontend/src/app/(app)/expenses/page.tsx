@@ -71,6 +71,8 @@ export default function ExpensesPage() {
       qc.invalidateQueries({ queryKey: ['expenses'] });
       qc.invalidateQueries({ queryKey: ['accounts'] });
       qc.invalidateQueries({ queryKey: ['dashboard-summary'] });
+      qc.invalidateQueries({ queryKey: ['salary-members'] });
+      qc.invalidateQueries({ queryKey: ['salary-user-expenses'] });
     },
     onError: (err) => {
       const ax = err as AxiosError<{ error?: { message?: string } }>;
@@ -114,7 +116,7 @@ export default function ExpensesPage() {
         rows={expenses.map((e) => [
           date(e.expense_date),
           e.category_name ?? '-',
-          e.user_name ?? '-',
+          e.user_name ?? 'Business Expense',
           e.description,
           e.mode === 'cash' ? 'Cash' : 'UPI/Bank',
           money(e.amount),

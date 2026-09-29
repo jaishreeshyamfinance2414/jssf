@@ -17,6 +17,8 @@ import { Input } from '@/components/ui/input';
 interface Member {
   user_id: string; staff_name: string; role_name: string;
   monthly_salary: string | null; payment_day: number | null;
+  salary_date: string | null;
+  upcoming_expense_deduct: string; upcoming_payable: string | null;
   last_paid_at: string | null; last_paid_amount: string | null;
   last_paid_year: number | null; last_paid_month: number | null;
 }
@@ -29,11 +31,17 @@ interface Salary {
 }
 
 interface Payable { baseSalary: number; pendingExpense: number; expenseDeduct: number; finalSalary: number }
+interface PersonalExpense {
+  user_id: string; staff_name: string; role_name: string; expense_month: string;
+  expense_count: number; total_expense: string;
+}
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const now = new Date();
+const upcoming = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+const monthLabel = (value: string) => new Date(value).toLocaleDateString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 const emptyPay = () => ({
-  userId: '', periodYear: String(now.getFullYear()), periodMonth: String(now.getMonth() + 1),
+  userId: '', periodYear: String(upcoming.getFullYear()), periodMonth: String(upcoming.getMonth() + 1),
   cashShortDeduct: '', advanceDeduct: '', mode: 'cash', paidDate: now.toISOString().slice(0, 10), note: '',
 });
 
@@ -45,10 +53,11 @@ export default function SalaryPage() {
   const [showPay, setShowPay] = useState(false);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('latest');
-  const [memberForm, setMemberForm] = useState({ userId: '', monthlySalary: '', paymentDay: '1' });
+  const [memberForm, setMemberForm] = useState({ userId: '', monthlySalary: '', salaryDate: upcoming.toISOString().slice(0, 10) });
   const [payForm, setPayForm] = useState(emptyPay);
   const { data: members = [] } = useQuery({ queryKey: ['salary-members'], queryFn: () => apiGet<Member[]>('/salaries/members') });
   const { data: salaries = [] } = useQuery({ queryKey: ['salaries'], queryFn: () => apiGet<Salary[]>('/salaries') });
+  const { data: personalExpenses = [] } = useQuery({ queryKey: ['salary-user-expenses'], queryFn: () => apiGet<PersonalExpense[]>('/salaries/user-expenses') });
 
   const payableParams = new URLSearchParams({
     userId: payForm.userId, periodYear: payForm.periodYear, periodMonth: payForm.periodMonth,
@@ -70,10 +79,10 @@ export default function SalaryPage() {
 
   const saveMember = useMutation({
     mutationFn: () => apiPost('/salaries/members', {
-      userId: memberForm.userId, monthlySalary: Number(memberForm.monthlySalary), paymentDay: Number(memberForm.paymentDay),
+      userId: memberForm.userId, monthlySalary: Number(memberForm.monthlySalary), salaryDate: memberForm.salaryDate,
     }),
     onSuccess: () => {
-      setError(null); setShowMember(false); setMemberForm({ userId: '', monthlySalary: '', paymentDay: '1' });
+      setError(null); setShowMember(false); setMemberForm({ userId: '', monthlySalary: '', salaryDate: upcoming.toISOString().slice(0, 10) });
       qc.invalidateQueries({ queryKey: ['salary-members'] });
     },
     onError: showError('Unable to save member salary.'),
@@ -103,12 +112,17 @@ export default function SalaryPage() {
   });
 
   function editMember(member: Member) {
-    setMemberForm({ userId: member.user_id, monthlySalary: member.monthly_salary ?? '', paymentDay: String(member.payment_day ?? 1) });
+    setMemberForm({ userId: member.user_id, monthlySalary: member.monthly_salary ?? '', salaryDate: member.salary_date?.slice(0, 10) ?? upcoming.toISOString().slice(0, 10) });
     setShowMember(true); setShowPay(false);
   }
 
   function openPay(member: Member) {
-    setPayForm({ ...emptyPay(), userId: member.user_id }); setShowPay(true); setShowMember(false);
+    const next = emptyPay();
+    if (member.salary_date) {
+      const [year, month] = member.salary_date.slice(0, 10).split('-');
+      next.periodYear = year; next.periodMonth = String(Number(month)); next.paidDate = member.salary_date.slice(0, 10);
+    }
+    setPayForm({ ...next, userId: member.user_id }); setShowPay(true); setShowMember(false);
   }
 
   const totalPaid = salaries.reduce((sum, salary) => sum + Number(salary.final_salary), 0);
@@ -147,7 +161,7 @@ export default function SalaryPage() {
                 {members.map((member) => <option key={member.user_id} value={member.user_id}>{member.staff_name} — {member.role_name}</option>)}
               </select>
               <Input type="number" min="0.01" step="0.01" placeholder="Fixed monthly salary" value={memberForm.monthlySalary} onChange={(event) => setMemberForm({ ...memberForm, monthlySalary: event.target.value })} required />
-              <Input type="number" min="1" max="31" placeholder="Monthly payment day" value={memberForm.paymentDay} onChange={(event) => setMemberForm({ ...memberForm, paymentDay: event.target.value })} required />
+              <div><label className="mb-1 block text-xs text-muted-foreground">Salary giving date</label><Input type="date" value={memberForm.salaryDate} onChange={(event) => setMemberForm({ ...memberForm, salaryDate: event.target.value })} required /></div>
               <Button className="md:col-span-3" disabled={saveMember.isPending}>Save Member Salary</Button>
             </form>
           </CardContent>
@@ -186,18 +200,40 @@ export default function SalaryPage() {
         <CardHeader><CardTitle>Active Members</CardTitle></CardHeader>
         <CardContent>
           <DataTable
-            columns={['Member', 'Role', 'Monthly Salary', 'Pay Day', 'Last Salary Period', 'Last Paid On', 'Last Paid', 'Actions']}
+            columns={['Member', 'Role', 'Monthly Salary', 'Upcoming Salary', 'Salary Giving Date', 'Last Salary Period', 'Last Paid On', 'Last Paid', 'Actions']}
             rows={members.map((member) => [
               member.staff_name,
               <StatusPill key={`${member.user_id}-role`} value={member.role_name} />,
               member.monthly_salary ? money(member.monthly_salary) : 'Not configured',
-              member.payment_day ? `Day ${member.payment_day}` : '-',
+              member.monthly_salary ? (
+                Number(member.upcoming_expense_deduct) > 0
+                  ? <div key={`${member.user_id}-upcoming`}><div className="font-semibold">{money(member.upcoming_payable ?? 0)}</div><div className="text-xs text-danger">Already took {money(member.upcoming_expense_deduct)}; hence upcoming salary becomes {money(member.upcoming_payable ?? 0)}.</div></div>
+                  : <span key={`${member.user_id}-upcoming`}>{money(member.upcoming_payable ?? member.monthly_salary)}</span>
+              ) : '-',
+              member.salary_date ? date(member.salary_date) : '-',
               member.last_paid_month ? `${MONTHS[member.last_paid_month - 1]} ${member.last_paid_year}` : '-',
               member.last_paid_at ? date(member.last_paid_at) : '-',
               member.last_paid_amount ? money(member.last_paid_amount) : '-',
               can('salary.manage') ? <div key={`${member.user_id}-actions`} className="flex gap-2"><Button size="sm" variant="outline" onClick={() => editMember(member)}>{member.monthly_salary ? 'Edit Salary' : 'Add Salary'}</Button>{member.monthly_salary && <Button size="sm" onClick={() => openPay(member)}>Pay Salary</Button>}</div> : '-',
             ])}
             empty="No active users"
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Monthly Personal Expenses</CardTitle></CardHeader>
+        <CardContent>
+          <DataTable
+            columns={['Member', 'Role', 'Month', 'Transactions', 'Personal Expense']}
+            rows={personalExpenses.map((expense) => [
+              expense.staff_name,
+              <StatusPill key={`${expense.user_id}-${expense.expense_month}-role`} value={expense.role_name} />,
+              monthLabel(expense.expense_month),
+              String(expense.expense_count),
+              <span key={`${expense.user_id}-${expense.expense_month}-amount`} className="font-semibold text-danger">{money(expense.total_expense)}</span>,
+            ])}
+            empty="No personal expenses recorded"
           />
         </CardContent>
       </Card>

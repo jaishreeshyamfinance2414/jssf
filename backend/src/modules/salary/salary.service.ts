@@ -7,7 +7,7 @@ import { CreateSalaryBody } from './salary.schema';
 import { salaryRepository } from './salary.repository';
 
 export const salaryService = {
-  async upsertMember(input: { userId: string; monthlySalary: number; paymentDay: number }, actorId: string, ip?: string | null) {
+  async upsertMember(input: { userId: string; monthlySalary: number; salaryDate: string }, actorId: string, ip?: string | null) {
     const member = await salaryRepository.upsertMember({ ...input, createdBy: actorId });
     if (!member) throw BadRequest('Selected user is not active.');
     await audit({ actorId, action: 'UPDATE', entity: 'member_salary', entityId: input.userId, meta: input, ip });
@@ -48,6 +48,12 @@ export const salaryService = {
 
       const salary = await salaryRepository.create({ ...input, baseSalary, expenseDeduct, finalSalary, createdBy: actorId }, client);
       await salaryRepository.allocateExpenses(salary.id, pending, expenseDeduct, client);
+      const nextMonth = new Date(Date.UTC(input.periodYear, input.periodMonth, 1));
+      const lastDay = new Date(Date.UTC(nextMonth.getUTCFullYear(), nextMonth.getUTCMonth() + 1, 0)).getUTCDate();
+      const nextSalaryDate = new Date(Date.UTC(
+        nextMonth.getUTCFullYear(), nextMonth.getUTCMonth(), Math.min(member.payment_day, lastDay),
+      )).toISOString().slice(0, 10);
+      await salaryRepository.advanceSalaryDate(input.userId, nextSalaryDate, client);
       if (finalSalary > 0) {
         const account = await accountsRepository.getByType(input.mode === 'cash' ? 'cash' : 'bank', client);
         await ledgerService.post(client, {

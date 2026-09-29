@@ -14,7 +14,7 @@ export const createSalarySchema = z.object({
 export const memberSalarySchema = z.object({
   userId: z.string().uuid('Select a staff member'),
   monthlySalary: z.coerce.number().positive('Monthly salary must be greater than zero'),
-  paymentDay: z.coerce.number().int().min(1).max(31),
+  salaryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Select a salary giving date'),
 });
 
 export const payableQuerySchema = z.object({

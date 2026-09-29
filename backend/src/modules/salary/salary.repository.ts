@@ -19,12 +19,28 @@ export const salaryRepository = {
   async members() {
     const { rows } = await query(
       `SELECT u.id AS user_id, u.full_name AS staff_name, r.name AS role_name,
-              ms.monthly_salary::text, ms.payment_day,
+              ms.monthly_salary::text, ms.payment_day, ms.salary_date,
+              COALESCE(pending.total, 0)::text AS upcoming_expense_deduct,
+              CASE WHEN ms.monthly_salary IS NULL THEN NULL
+                   ELSE GREATEST(ms.monthly_salary - COALESCE(pending.total, 0), 0)::text
+              END AS upcoming_payable,
               last_pay.paid_at AS last_paid_at, last_pay.final_salary::text AS last_paid_amount,
               last_pay.period_year AS last_paid_year, last_pay.period_month AS last_paid_month
          FROM users u
          JOIN roles r ON r.id = u.role_id
          LEFT JOIN member_salaries ms ON ms.user_id = u.id
+         LEFT JOIN LATERAL (
+           SELECT sum(item.remaining) AS total
+             FROM (
+               SELECT e.amount - COALESCE(sum(a.amount), 0) AS remaining
+                 FROM expenses e
+                 LEFT JOIN salary_expense_allocations a ON a.expense_id = e.id
+                WHERE e.user_id = u.id
+                  AND e.expense_date < date_trunc('month', ms.salary_date)
+                GROUP BY e.id
+               HAVING e.amount - COALESCE(sum(a.amount), 0) > 0
+             ) item
+         ) pending ON true
          LEFT JOIN LATERAL (
            SELECT s.paid_at, s.final_salary, s.period_year, s.period_month
              FROM salaries s WHERE s.user_id = u.id
@@ -36,16 +52,41 @@ export const salaryRepository = {
     return rows;
   },
 
-  async upsertMember(input: { userId: string; monthlySalary: number; paymentDay: number; createdBy: string }) {
+  async userExpenses() {
     const { rows } = await query(
-      `INSERT INTO member_salaries(user_id, monthly_salary, payment_day, created_by)
-       SELECT u.id, $2, $3, $4 FROM users u WHERE u.id = $1 AND u.is_active = true
+      `SELECT u.id AS user_id, u.full_name AS staff_name, r.name AS role_name,
+              date_trunc('month', e.expense_date)::date AS expense_month,
+              count(*)::int AS expense_count, sum(e.amount)::text AS total_expense
+         FROM expenses e
+         JOIN users u ON u.id = e.user_id
+         JOIN roles r ON r.id = u.role_id
+        GROUP BY u.id, u.full_name, r.name, date_trunc('month', e.expense_date)
+        ORDER BY expense_month DESC, u.full_name
+        LIMIT 300`,
+    );
+    return rows;
+  },
+
+  async upsertMember(input: { userId: string; monthlySalary: number; salaryDate: string; createdBy: string }) {
+    const { rows } = await query(
+      `INSERT INTO member_salaries(user_id, monthly_salary, payment_day, salary_date, created_by)
+       SELECT u.id, $2, EXTRACT(day FROM $3::date)::int, $3::date, $4
+         FROM users u WHERE u.id = $1 AND u.is_active = true
        ON CONFLICT (user_id) DO UPDATE
-         SET monthly_salary = EXCLUDED.monthly_salary, payment_day = EXCLUDED.payment_day
+         SET monthly_salary = EXCLUDED.monthly_salary,
+             payment_day = EXCLUDED.payment_day,
+             salary_date = EXCLUDED.salary_date
        RETURNING user_id`,
-      [input.userId, input.monthlySalary, input.paymentDay, input.createdBy],
+      [input.userId, input.monthlySalary, input.salaryDate, input.createdBy],
     );
     return rows[0] ?? null;
+  },
+
+  async advanceSalaryDate(userId: string, salaryDate: string, client: PoolClient) {
+    await client.query(
+      `UPDATE member_salaries SET salary_date = GREATEST(salary_date, $2::date) WHERE user_id = $1`,
+      [userId, salaryDate],
+    );
   },
 
   async member(userId: string, client?: PoolClient) {
