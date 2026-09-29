@@ -20,6 +20,7 @@ interface Txn {
   entry_date: string;
   created_at: string;
   running_balance: string;
+  created_by_name: string | null;
 }
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -69,7 +70,7 @@ export default function AccountsPage() {
           <CardHeader><CardTitle>{openAccount.name} — Ledger (how the balance arrived)</CardTitle></CardHeader>
           <CardContent>
             <DataTable
-              columns={['Transaction Date', 'Description', 'Source', 'Credit', 'Debit', 'Running Balance']}
+              columns={['Transaction Date', 'Description', 'Source', 'Credit', 'Debit', 'Running Balance', 'By']}
               rows={txns.map((t) => [
                 dateTime(t.entry_date),
                 t.description || SOURCE_LABEL[t.source] || t.source,
@@ -77,6 +78,7 @@ export default function AccountsPage() {
                 t.direction === 'credit' ? money(t.amount) : '-',
                 t.direction === 'debit' ? money(t.amount) : '-',
                 money(t.running_balance),
+                t.created_by_name ?? '-',
               ])}
               empty="No transactions recorded for this account yet"
             />

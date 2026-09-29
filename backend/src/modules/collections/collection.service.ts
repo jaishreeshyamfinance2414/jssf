@@ -156,7 +156,7 @@ export const collectionService = {
           amount: input.amount + input.penalty,
           source: 'collection',
           referenceId: collection.id,
-          description: `Collection for ${loan.loan_number}`,
+          description: `Collection for ${loan.customer_name}, (${loan.loan_number.slice(-4)})`,
           createdBy: actorId,
           txnDate: input.entryDate ? collectionDate : null,
         });
@@ -293,7 +293,7 @@ export const collectionService = {
           amount: newAmount + newPenalty,
           source: 'collection',
           referenceId: id,
-          description: `Collection (type correction) for ${loan.loan_number}`,
+          description: `Collection for ${loan.customer_name}, (${loan.loan_number.slice(-4)})`,
           createdBy: actorId,
           txnDate: ledgerDate,
         });
@@ -308,7 +308,7 @@ export const collectionService = {
           amount: newAmount + newPenalty,
           source: 'collection',
           referenceId: id,
-          description: `Collection (automatic entry correction) for ${loan.loan_number}`,
+          description: `Collection for ${loan.customer_name}, (${loan.loan_number.slice(-4)})`,
           createdBy: actorId,
           txnDate: ledgerDate,
         });

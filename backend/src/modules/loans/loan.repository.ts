@@ -103,7 +103,14 @@ export const loanRepository = {
 
   /** Lock the loan row for the duration of an approval/disbursement transaction. */
   async lockForUpdate(id: string, client: PoolClient) {
-    const { rows } = await client.query(`SELECT *, loan_date::text AS loan_date FROM loans WHERE id = $1 FOR UPDATE`, [id]);
+    const { rows } = await client.query(
+      `SELECT l.*, l.loan_date::text AS loan_date, c.full_name AS customer_name
+         FROM loans l
+         JOIN customers c ON c.id = l.customer_id
+        WHERE l.id = $1
+        FOR UPDATE OF l`,
+      [id],
+    );
     return rows[0] ?? null;
   },
 

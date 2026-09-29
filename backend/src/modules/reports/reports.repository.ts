@@ -151,14 +151,22 @@ export const reportsRepository = {
   async accountLedger(from: string, to: string) {
     const { rows } = await query(
       `WITH entries AS (
-         SELECT t.*, COALESCE(c.entry_date,
+         SELECT t.id, t.account_id, t.direction, t.amount, t.source, t.reference_id,
+                CASE WHEN t.source = 'collection' AND cu.full_name IS NOT NULL
+                     THEN 'Collection for ' || cu.full_name || ', (' || RIGHT(l.loan_number, 4) || ')'
+                     ELSE t.description END AS description,
+                t.txn_date, t.created_by, t.created_at,
+                COALESCE(c.entry_date,
                   ((t.txn_date::timestamp + (t.created_at AT TIME ZONE 'Asia/Kolkata')::time)
                     AT TIME ZONE 'Asia/Kolkata')) AS entry_date
            FROM account_transactions t
            LEFT JOIN collections c ON t.source = 'collection' AND c.id = t.reference_id
+           LEFT JOIN loans l ON l.id = c.loan_id
+           LEFT JOIN customers cu ON cu.id = l.customer_id
        )
        SELECT t.entry_date, t.created_at, a.name AS account, a.type AS account_type,
-              t.direction, t.amount::text, t.source, t.description, u.full_name AS created_by
+              t.direction, t.amount::text, t.source, t.description,
+              u.full_name AS created_by
          FROM entries t
          JOIN accounts a ON a.id = t.account_id
          LEFT JOIN users u ON u.id = t.created_by
