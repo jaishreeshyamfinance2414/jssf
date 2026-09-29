@@ -168,7 +168,7 @@ async function seed() {
     }
 
     // Expense categories
-    for (const name of ['Rent', 'Utilities', 'Fuel', 'Office', 'Salary', 'Misc']) {
+    for (const name of ['Rent', 'Utilities', 'Fuel', 'Office', 'Salary', 'User Expense', 'Misc']) {
       await c.query(
         `INSERT INTO expense_categories(name) VALUES ($1) ON CONFLICT (name) DO NOTHING`,
         [name],

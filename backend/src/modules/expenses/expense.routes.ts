@@ -10,6 +10,7 @@ router.use(authenticate);
 
 router.get('/', requirePermission('expense.view'), asyncHandler(expenseController.list));
 router.get('/categories', requirePermission('expense.view'), asyncHandler(expenseController.categories));
+router.get('/users', requirePermission('expense.view'), asyncHandler(expenseController.users));
 router.post(
   '/',
   requirePermission('expense.manage'),

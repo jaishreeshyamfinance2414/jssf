@@ -12,6 +12,10 @@ export const expenseController = {
     return ok(res, await expenseRepository.categories());
   },
 
+  async users(_req: Request, res: Response) {
+    return ok(res, await expenseRepository.activeUsers());
+  },
+
   async create(req: Request, res: Response) {
     return created(res, await expenseService.create(req.body, req.user!.sub, req.ip));
   },

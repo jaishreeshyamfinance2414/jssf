@@ -7,18 +7,47 @@ import { CreateSalaryBody } from './salary.schema';
 import { salaryRepository } from './salary.repository';
 
 export const salaryService = {
+  async upsertMember(input: { userId: string; monthlySalary: number; paymentDay: number }, actorId: string, ip?: string | null) {
+    const member = await salaryRepository.upsertMember({ ...input, createdBy: actorId });
+    if (!member) throw BadRequest('Selected user is not active.');
+    await audit({ actorId, action: 'UPDATE', entity: 'member_salary', entityId: input.userId, meta: input, ip });
+    return member;
+  },
+
+  async payable(input: { userId: string; periodYear: number; periodMonth: number; cashShortDeduct: number; advanceDeduct: number }) {
+    const member = await salaryRepository.member(input.userId);
+    if (!member) throw BadRequest('Add a fixed salary for this active user first.');
+    const baseSalary = Number(member.monthly_salary);
+    const otherDeductions = input.cashShortDeduct + input.advanceDeduct;
+    if (otherDeductions > baseSalary) throw BadRequest('Deductions exceed the monthly salary.');
+    const pending = await salaryRepository.pendingExpenses(input.userId, input.periodYear, input.periodMonth);
+    const pendingExpense = pending.reduce((sum, expense) => sum + Number(expense.remaining), 0);
+    const expenseDeduct = Math.min(pendingExpense, baseSalary - otherDeductions);
+    return {
+      baseSalary,
+      pendingExpense: Number(pendingExpense.toFixed(2)),
+      expenseDeduct: Number(expenseDeduct.toFixed(2)),
+      finalSalary: Number((baseSalary - otherDeductions - expenseDeduct).toFixed(2)),
+    };
+  },
+
   /** Pay a staff salary: record the row and debit cash/bank via the shared ledger. */
   async create(input: CreateSalaryBody, actorId: string, ip?: string | null) {
-    const finalSalary = Number(
-      (input.baseSalary - input.cashShortDeduct - input.advanceDeduct - input.expenseDeduct).toFixed(2),
-    );
-    if (finalSalary < 0) throw BadRequest('Deductions exceed the base salary.');
-
     return withTransaction(async (client) => {
+      const member = await salaryRepository.member(input.userId, client);
+      if (!member) throw BadRequest('Add a fixed salary for this active user first.');
       const existing = await salaryRepository.findForPeriod(input.userId, input.periodYear, input.periodMonth, client);
       if (existing) throw BadRequest('Salary for this staff member and month is already recorded.');
+      const baseSalary = Number(member.monthly_salary);
+      const otherDeductions = input.cashShortDeduct + input.advanceDeduct;
+      if (otherDeductions > baseSalary) throw BadRequest('Deductions exceed the monthly salary.');
+      const pending = await salaryRepository.pendingExpenses(input.userId, input.periodYear, input.periodMonth, client);
+      const pendingExpense = pending.reduce((sum, expense) => sum + Number(expense.remaining), 0);
+      const expenseDeduct = Number(Math.min(pendingExpense, baseSalary - otherDeductions).toFixed(2));
+      const finalSalary = Number((baseSalary - otherDeductions - expenseDeduct).toFixed(2));
 
-      const salary = await salaryRepository.create({ ...input, finalSalary, createdBy: actorId }, client);
+      const salary = await salaryRepository.create({ ...input, baseSalary, expenseDeduct, finalSalary, createdBy: actorId }, client);
+      await salaryRepository.allocateExpenses(salary.id, pending, expenseDeduct, client);
       if (finalSalary > 0) {
         const account = await accountsRepository.getByType(input.mode === 'cash' ? 'cash' : 'bank', client);
         await ledgerService.post(client, {
@@ -37,7 +66,7 @@ export const salaryService = {
           action: 'CREATE',
           entity: 'salary',
           entityId: salary.id,
-          meta: { userId: input.userId, period: `${input.periodMonth}/${input.periodYear}`, finalSalary, mode: input.mode },
+          meta: { userId: input.userId, period: `${input.periodMonth}/${input.periodYear}`, baseSalary, expenseDeduct, finalSalary, mode: input.mode },
           ip,
         },
         client,

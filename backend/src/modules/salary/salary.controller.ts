@@ -8,6 +8,18 @@ export const salaryController = {
     return ok(res, await salaryRepository.list());
   },
 
+  async members(_req: Request, res: Response) {
+    return ok(res, await salaryRepository.members());
+  },
+
+  async payable(req: Request, res: Response) {
+    return ok(res, await salaryService.payable(req.query as any));
+  },
+
+  async upsertMember(req: Request, res: Response) {
+    return ok(res, await salaryService.upsertMember(req.body, req.user!.sub, req.ip));
+  },
+
   async create(req: Request, res: Response) {
     return created(res, await salaryService.create(req.body, req.user!.sub, req.ip));
   },
