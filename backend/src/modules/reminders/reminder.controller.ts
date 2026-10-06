@@ -16,4 +16,7 @@ export const reminderController = {
   async complete(req: Request, res: Response) {
     return ok(res, await reminderService.complete(req.params.id, req.user!.sub, req.ip));
   },
+  async delete(req: Request, res: Response) {
+    return ok(res, await reminderService.delete(req.params.id, req.user!.sub, req.ip));
+  },
 };

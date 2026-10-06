@@ -22,4 +22,24 @@ export const reminderService = {
       return reminder;
     });
   },
+
+  async delete(id: string, actorId: string, ip?: string) {
+    return withTransaction(async (client) => {
+      const reminder = await reminderRepository.delete(id, client);
+      if (!reminder) throw NotFound('Reminder not found');
+      await audit({
+        actorId,
+        action: 'DELETE',
+        entity: 'reminder',
+        entityId: id,
+        meta: {
+          customerId: reminder.customer_id,
+          reminderDate: reminder.reminder_date,
+          amount: reminder.amount,
+        },
+        ip,
+      }, client);
+      return { id, deleted: true };
+    });
+  },
 };

@@ -70,6 +70,15 @@ export const reminderRepository = {
     return rows[0] ?? null;
   },
 
+  async delete(id: string, client: PoolClient) {
+    const { rows } = await client.query<{ id: string; customer_id: string; reminder_date: string; amount: string }>(
+      `DELETE FROM reminders WHERE id=$1
+       RETURNING id, customer_id, reminder_date, amount::text`,
+      [id],
+    );
+    return rows[0] ?? null;
+  },
+
   async notifications() {
     const { rows: manual } = await query(
       `SELECT r.id, 'manual'::text AS type, c.full_name AS title,
@@ -77,7 +86,7 @@ export const reminderRepository = {
               c.id AS customer_id, NULL::uuid AS borrowed_loan_id
          FROM reminders r
          JOIN customers c ON c.id=r.customer_id
-        WHERE r.status='pending' AND r.reminder_date <= CURRENT_DATE
+        WHERE r.status='pending'
         ORDER BY r.reminder_date ASC, r.created_at ASC`,
     );
 
@@ -105,7 +114,7 @@ export const reminderRepository = {
         WHERE bl.status='active'
           AND (CASE WHEN bl.loan_type='interest_only'
                     THEN (bl.first_payment_date + (COALESCE(p.payment_count,0)::int * interval '1 month'))::date
-                    ELSE ns.due_date END) BETWEEN CURRENT_DATE AND CURRENT_DATE + 7
+                    ELSE ns.due_date END) <= CURRENT_DATE + 7
         ORDER BY due_date ASC`,
     );
 

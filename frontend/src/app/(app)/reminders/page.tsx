@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
-import { BellRing, Check, Plus } from 'lucide-react';
-import { apiGet, apiPost } from '@/lib/api';
+import { BellRing, Check, Plus, Trash2 } from 'lucide-react';
+import { apiDelete, apiGet, apiPost } from '@/lib/api';
 import { date, money } from '@/lib/format';
 import { PageShell } from '@/components/app/page-shell';
 import { DataTable } from '@/components/app/data-table';
@@ -60,10 +60,20 @@ export default function RemindersPage() {
       qc.invalidateQueries({ queryKey: ['reminders'] });
       qc.invalidateQueries({ queryKey: ['notifications'] });
     },
+    onError: (err) => setError(errorMessage(err)),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => apiDelete(`/reminders/${id}`),
+    onSuccess: () => {
+      setError(null);
+      qc.invalidateQueries({ queryKey: ['reminders'] });
+      qc.invalidateQueries({ queryKey: ['notifications'] });
+    },
+    onError: (err) => setError(errorMessage(err)),
   });
 
   return (
-    <PageShell title="Set Reminders" description="Record customer payment promises. Pending reminders appear in the dashboard notification bell on their due date and remain there until completed.">
+    <PageShell title="Set Reminders" description="Record customer payment promises. Pending reminders appear in the notification bell immediately and remain until completed or deleted.">
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><BellRing className="h-4 w-4" /> Add Payment Reminder</CardTitle></CardHeader>
         <CardContent>
@@ -94,7 +104,12 @@ export default function RemindersPage() {
           reminder.note,
           reminder.created_by_name,
           <span key="status" className={`rounded-full px-2 py-1 text-xs font-semibold ${reminder.status === 'pending' ? 'bg-warning/10 text-warning' : 'bg-success/10 text-success'}`}>{reminder.status === 'pending' ? 'Pending' : 'Completed'}</span>,
-          reminder.status === 'pending' ? <Button key="complete" size="sm" variant="outline" disabled={complete.isPending} onClick={() => complete.mutate(reminder.id)}><Check className="h-4 w-4" /> Complete</Button> : '-',
+          <div key="actions" className="flex flex-wrap gap-2">
+            {reminder.status === 'pending' && <Button size="sm" variant="outline" disabled={complete.isPending || remove.isPending} onClick={() => complete.mutate(reminder.id)}><Check className="h-4 w-4" /> Complete</Button>}
+            <Button size="sm" variant="danger" disabled={complete.isPending || remove.isPending} onClick={() => {
+              if (window.confirm(`Delete the reminder for ${reminder.customer_name}? This cannot be undone.`)) remove.mutate(reminder.id);
+            }}><Trash2 className="h-4 w-4" /> Delete</Button>
+          </div>,
         ])}
       />
     </PageShell>

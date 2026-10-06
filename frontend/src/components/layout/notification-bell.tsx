@@ -73,7 +73,7 @@ export function NotificationBell() {
           <div className="flex items-center justify-between border-b px-4 py-3">
             <div>
               <p className="font-semibold">Notifications</p>
-              <p className="text-xs text-muted-foreground">Due reminders and payments coming within 7 days</p>
+              <p className="text-xs text-muted-foreground">All reminders · payments due within 7 days or overdue</p>
             </div>
             <button onClick={() => setOpen(false)} className="rounded-md p-1 text-muted-foreground hover:bg-muted" aria-label="Close notifications">
               <X className="h-4 w-4" />
