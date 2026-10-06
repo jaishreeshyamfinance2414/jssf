@@ -3,8 +3,9 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Bell, Download, Plus, Menu, Search, X } from 'lucide-react';
+import { Download, Plus, Menu, Search, X } from 'lucide-react';
 import { GlobalSearch } from './global-search';
+import { NotificationBell } from './notification-bell';
 import { useBranding } from '@/lib/branding-context';
 
 const TITLES: Record<string, string> = {
@@ -18,6 +19,7 @@ const TITLES: Record<string, string> = {
   '/areas': 'Areas',
   '/capital': 'Capital',
   '/borrowed-loans': 'Borrowed Loans',
+  '/reminders': 'Set Reminders',
   '/accounts': 'Cash & Bank',
   '/expenses': 'Expenses',
   '/salary': 'Salary',
@@ -84,12 +86,7 @@ export function Topbar({ onMenu }: { onMenu?: () => void }) {
             >
               {searchOpen ? <X className="h-[18px] w-[18px]" /> : <Search className="h-[18px] w-[18px]" />}
             </button>
-            <button
-              className="hidden h-9 w-9 items-center justify-center rounded-xl border border-white/15 bg-white/10 text-white/85 backdrop-blur-sm transition-colors hover:text-white sm:flex md:h-10 md:w-10 md:border-border md:bg-card md:text-muted-foreground md:hover:text-foreground"
-              title="Notifications"
-            >
-              <Bell className="h-[18px] w-[18px]" />
-            </button>
+            <NotificationBell />
             <button
               className="hidden h-9 w-9 items-center justify-center rounded-xl border border-white/15 bg-white/10 text-white/85 backdrop-blur-sm transition-colors hover:text-white sm:flex md:h-10 md:w-10 md:border-border md:bg-card md:text-muted-foreground md:hover:text-foreground"
               title="Export"

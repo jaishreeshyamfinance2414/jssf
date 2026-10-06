@@ -17,6 +17,7 @@ import auditRoutes from './modules/audit/audit.routes';
 import salaryRoutes from './modules/salary/salary.routes';
 import fileRoutes from './modules/files/files.routes';
 import settingRoutes from './modules/settings/settings.routes';
+import reminderRoutes from './modules/reminders/reminder.routes';
 
 /**
  * Central API router. New modules (customers, loans, collections, expenses,
@@ -42,5 +43,6 @@ api.use('/audit', auditRoutes);
 api.use('/salaries', salaryRoutes);
 api.use('/files', fileRoutes);
 api.use('/settings', settingRoutes);
+api.use('/reminders', reminderRoutes);
 
 export default api;

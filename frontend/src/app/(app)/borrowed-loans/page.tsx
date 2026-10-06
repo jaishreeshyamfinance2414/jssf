@@ -124,6 +124,7 @@ export default function BorrowedLoansPage() {
       qc.invalidateQueries({ queryKey: ['borrowed-loans'] });
       qc.invalidateQueries({ queryKey: ['accounts'] });
       qc.invalidateQueries({ queryKey: ['dashboard-summary'] });
+      qc.invalidateQueries({ queryKey: ['notifications'] });
     },
     onError: (error) => setCreateError(errorMessage(error, 'Unable to create borrowed loan.')),
   });
@@ -141,6 +142,7 @@ export default function BorrowedLoansPage() {
       qc.invalidateQueries({ queryKey: ['accounts'] });
       qc.invalidateQueries({ queryKey: ['account-transactions'] });
       qc.invalidateQueries({ queryKey: ['dashboard-summary'] });
+      qc.invalidateQueries({ queryKey: ['notifications'] });
     },
     onError: (error) => setPaymentError(errorMessage(error, 'Unable to record payment.')),
   });
