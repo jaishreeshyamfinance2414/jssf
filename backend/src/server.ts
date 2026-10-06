@@ -4,11 +4,17 @@ import { logger } from './config/logger';
 import { pool } from './db/pool';
 import { startMissedEmiJob } from './modules/collections/missed-emi.job';
 import { collectionRepository } from './modules/collections/collection.repository';
+import { reminderRepository } from './modules/reminders/reminder.repository';
 
 async function bootstrap() {
   // Verify DB connectivity before accepting traffic — fail fast.
   await pool.query('SELECT 1');
   logger.info('Database connection OK');
+
+  // Reminders are user-facing immediately after deployment. Ensure their
+  // table exists before accepting traffic, even if a release was restarted
+  // without the normal `npm run migrate` deployment step.
+  await reminderRepository.ensureInfrastructure();
 
   // The sweep starts immediately, so its small supporting table must exist
   // before the first run even when a deployment omitted `npm run migrate`.

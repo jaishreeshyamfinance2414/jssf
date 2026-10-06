@@ -2,6 +2,41 @@ import { PoolClient } from 'pg';
 import { query } from '../../db/pool';
 
 export const reminderRepository = {
+  /**
+   * Keep reminder creation usable even if an operator restarts new API code
+   * before running the release migration. The numbered migration remains the
+   * canonical schema; these idempotent statements are a startup safety net.
+   */
+  async ensureInfrastructure() {
+    await query(`
+      CREATE TABLE IF NOT EXISTS reminders (
+        id             uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+        customer_id    uuid NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+        reminder_date  date NOT NULL,
+        amount         numeric(14,2) NOT NULL CHECK (amount > 0),
+        note           text NOT NULL,
+        status         text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','completed')),
+        completed_at   timestamptz,
+        completed_by   uuid REFERENCES users(id),
+        created_by     uuid NOT NULL REFERENCES users(id),
+        created_at     timestamptz NOT NULL DEFAULT now(),
+        updated_at     timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS idx_reminders_pending_date
+        ON reminders(reminder_date) WHERE status = 'pending';
+      CREATE INDEX IF NOT EXISTS idx_reminders_customer ON reminders(customer_id);
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_trigger WHERE tgname = 'trg_reminders_updated'
+        ) THEN
+          CREATE TRIGGER trg_reminders_updated BEFORE UPDATE ON reminders
+            FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+        END IF;
+      END $$;
+    `);
+  },
+
   async list() {
     const { rows } = await query(
       `SELECT r.id, r.customer_id, c.full_name AS customer_name, c.mobile AS customer_mobile,
