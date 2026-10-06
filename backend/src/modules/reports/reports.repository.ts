@@ -21,8 +21,8 @@ export const reportsRepository = {
       `SELECT
          COALESCE((SELECT sum(amount) FROM collections
                     WHERE (entry_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $1 AND $2), 0)::text AS collected,
-         COALESCE((SELECT sum(penalty) FROM collections
-                    WHERE (entry_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $1 AND $2), 0)::text AS penalty_income,
+         COALESCE((SELECT sum(amount) FROM loan_daily_penalties
+                    WHERE penalty_date BETWEEN $1 AND $2), 0)::text AS penalty_income,
          COALESCE((SELECT sum(principal) FROM loans
                     WHERE disbursed_at::date BETWEEN $1 AND $2), 0)::text AS disbursed,
          COALESCE((SELECT sum(interest_amount) FROM loans
@@ -58,9 +58,14 @@ export const reportsRepository = {
               count(*) FILTER (WHERE c.type = 'missed') AS missed_entries,
               COALESCE(sum(c.amount) FILTER (WHERE c.mode = 'cash'), 0)::text AS cash,
               COALESCE(sum(c.amount) FILTER (WHERE c.mode != 'cash'), 0)::text AS digital,
-              COALESCE(sum(c.penalty), 0)::text AS penalty,
+              COALESCE(max(p.amount), 0)::text AS penalty,
               COALESCE(sum(c.amount), 0)::text AS total
          FROM collections c
+         LEFT JOIN (
+           SELECT penalty_date, sum(amount) AS amount
+             FROM loan_daily_penalties
+            GROUP BY penalty_date
+         ) p ON p.penalty_date = (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date
         WHERE (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $1 AND $2
         GROUP BY (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date
         ORDER BY (c.entry_date AT TIME ZONE 'Asia/Kolkata')::date DESC`,
@@ -110,11 +115,14 @@ export const reportsRepository = {
       [customerId],
     );
     const { rows: entries } = await query(
-      `SELECT co.entry_date, l.loan_number, co.amount::text, co.penalty::text,
+      `SELECT co.entry_date, l.loan_number, co.amount::text,
+              COALESCE(p.amount, 0)::text AS penalty,
               co.type, co.mode,
               COALESCE(agent.full_name, creator.full_name, 'Automatic') AS agent_name
          FROM collections co
          JOIN loans l ON l.id = co.loan_id
+         LEFT JOIN loan_daily_penalties p ON p.loan_id = co.loan_id
+          AND p.penalty_date = (co.entry_date AT TIME ZONE 'Asia/Kolkata')::date
          LEFT JOIN users agent ON agent.id = co.agent_id
          LEFT JOIN users creator ON creator.id = co.created_by
         WHERE l.customer_id = $1
