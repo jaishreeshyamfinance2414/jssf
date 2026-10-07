@@ -81,7 +81,7 @@ export default function ExpensesPage() {
   });
 
   return (
-    <PageShell title="Expenses" description="Business expenses, including interest paid on borrowed loans, deducted from cash or bank balance.">
+    <PageShell title="Expenses" description="Business expenses and staff advances deducted from the cash or bank balance.">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Receipt className="h-4 w-4" /> Add Expense</CardTitle>
@@ -108,6 +108,11 @@ export default function ExpensesPage() {
             <Button className="lg:col-span-6" disabled={create.isPending}><Plus className="h-4 w-4" /> Add Expense</Button>
           </form>
           {error && <div className="mt-3 rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
+          {isUserExpense && (
+            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+              A User Expense reduces cash or bank now and the selected member&apos;s payable salary later. It is not included in business expenses or Profit &amp; Loss.
+            </div>
+          )}
         </CardContent>
       </Card>
 

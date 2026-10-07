@@ -48,7 +48,7 @@ export function KpiStrip({ kpis }: { kpis: DashboardData['kpis'] }) {
       icon: ArrowUpRight,
     },
     {
-      label: `Expenses (${month})`,
+      label: `Business Expenses (${month})`,
       value: inr(kpis.totalExpenses),
       hint: kpis.salaryExpense != null ? `incl. ${inr(kpis.salaryExpense)} salary` : undefined,
       icon: DollarSign,

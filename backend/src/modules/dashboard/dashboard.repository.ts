@@ -241,8 +241,11 @@ export const dashboardRepository = {
   async totalExpenses(): Promise<number> {
     const { rows } = await query<{ s: string }>(
       `SELECT (
-         COALESCE((SELECT sum(amount) FROM expenses
-                    WHERE date_trunc('month', expense_date) = date_trunc('month', CURRENT_DATE)),0) +
+         COALESCE((SELECT sum(e.amount)
+                     FROM expenses e
+                     LEFT JOIN expense_categories category ON category.id = e.category_id
+                    WHERE date_trunc('month', e.expense_date) = date_trunc('month', CURRENT_DATE)
+                      AND category.name IS DISTINCT FROM 'User Expense'),0) +
          COALESCE((SELECT sum(interest_amount) FROM borrowed_loan_payments
                     WHERE date_trunc('month', payment_date) = date_trunc('month', CURRENT_DATE)),0)
        )::text AS s`,

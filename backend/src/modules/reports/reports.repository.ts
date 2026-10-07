@@ -27,8 +27,11 @@ export const reportsRepository = {
                     WHERE disbursed_at::date BETWEEN $1 AND $2), 0)::text AS disbursed,
          COALESCE((SELECT sum(interest_amount) FROM loans
                     WHERE disbursed_at::date BETWEEN $1 AND $2), 0)::text AS interest_booked,
-         COALESCE((SELECT sum(amount) FROM expenses
-                    WHERE expense_date BETWEEN $1 AND $2), 0)::text AS expenses,
+         COALESCE((SELECT sum(e.amount)
+                     FROM expenses e
+                     LEFT JOIN expense_categories category ON category.id = e.category_id
+                    WHERE e.expense_date BETWEEN $1 AND $2
+                      AND category.name IS DISTINCT FROM 'User Expense'), 0)::text AS expenses,
          COALESCE((SELECT sum(interest_amount) FROM borrowed_loan_payments
                     WHERE payment_date BETWEEN $1 AND $2), 0)::text AS borrowed_interest,
          COALESCE((SELECT sum(final_salary) FROM salaries

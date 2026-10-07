@@ -136,7 +136,7 @@ export default function ReportsPage() {
         ['Penalty accrued', pl.penaltyIncome],
         ['Interest + fees booked', pl.interestBooked],
         ['Loans disbursed', pl.disbursed],
-        ['Expenses', pl.expenses],
+        ['Business expenses (excludes user expenses)', pl.expenses],
         ['Borrowed loan interest expense', pl.borrowedInterest],
         ['Salaries paid', pl.salaries],
         ['Capital introduced', pl.capitalIn],
@@ -231,7 +231,7 @@ export default function ReportsPage() {
             <Stat label="Interest + Fees Booked" value={money(pl.interestBooked)} tone="text-success" />
             <Stat label="Capital Introduced" value={money(pl.capitalIn)} />
             <Stat label="Loans Disbursed" value={money(pl.disbursed)} />
-            <Stat label="Expenses" value={money(pl.expenses)} tone="text-danger" />
+            <Stat label="Business Expenses" value={money(pl.expenses)} tone="text-danger" />
             <Stat label="Borrowed Loan Interest" value={money(pl.borrowedInterest)} tone="text-danger" />
             <Stat label="Salaries Paid" value={money(pl.salaries)} tone="text-danger" />
             <Stat label="Net (Income − Outgo)" value={money(plNet)} tone={plNet >= 0 ? 'text-success' : 'text-danger'} />
@@ -239,7 +239,8 @@ export default function ReportsPage() {
           <Card>
             <CardHeader><CardTitle className="flex items-center gap-2"><BarChart3 className="h-4 w-4" /> How this is computed</CardTitle></CardHeader>
             <CardContent className="text-sm text-muted-foreground">
-              Net = interest booked on loans disbursed in the period + penalty accrued − expenses − borrowed-loan interest − salaries.
+              Net = interest booked on loans disbursed in the period + penalty accrued − business expenses − borrowed-loan interest − salaries.
+              User expenses are staff advances: they reduce cash and the member&apos;s payable salary, but are excluded from Profit &amp; Loss.
               Collections and disbursements move cash but are principal flows, not profit.
             </CardContent>
           </Card>
