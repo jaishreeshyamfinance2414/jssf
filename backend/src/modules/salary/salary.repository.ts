@@ -118,13 +118,14 @@ export const salaryRepository = {
 
   async member(userId: string, client?: PoolClient) {
     const sql =
-      `SELECT ms.monthly_salary::text, ms.payment_day
+      `SELECT ms.monthly_salary::text, ms.payment_day, u.full_name,
+              (SELECT count(*)::int FROM salaries s WHERE s.user_id = ms.user_id) AS salary_count
          FROM member_salaries ms JOIN users u ON u.id = ms.user_id
         WHERE ms.user_id = $1 AND u.is_active = true
         ${client ? 'FOR UPDATE OF ms' : ''}`;
     const { rows } = client
-      ? await client.query<{ monthly_salary: string; payment_day: number }>(sql, [userId])
-      : await query<{ monthly_salary: string; payment_day: number }>(sql, [userId]);
+      ? await client.query<{ monthly_salary: string; payment_day: number; full_name: string; salary_count: number }>(sql, [userId])
+      : await query<{ monthly_salary: string; payment_day: number; full_name: string; salary_count: number }>(sql, [userId]);
     return rows[0] ?? null;
   },
 

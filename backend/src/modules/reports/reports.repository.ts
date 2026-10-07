@@ -34,7 +34,7 @@ export const reportsRepository = {
                       AND category.name IS DISTINCT FROM 'User Expense'), 0)::text AS expenses,
          COALESCE((SELECT sum(interest_amount) FROM borrowed_loan_payments
                     WHERE payment_date BETWEEN $1 AND $2), 0)::text AS borrowed_interest,
-         COALESCE((SELECT sum(final_salary) FROM salaries
+         COALESCE((SELECT sum(final_salary + advance_deduct + expense_deduct) FROM salaries
                     WHERE paid_at::date BETWEEN $1 AND $2), 0)::text AS salaries,
          COALESCE((SELECT sum(amount) FROM capital_entries
                     WHERE entry_date BETWEEN $1 AND $2), 0)::text AS capital_in`,

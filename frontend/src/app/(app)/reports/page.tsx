@@ -138,7 +138,7 @@ export default function ReportsPage() {
         ['Loans disbursed', pl.disbursed],
         ['Business expenses (excludes user expenses)', pl.expenses],
         ['Borrowed loan interest expense', pl.borrowedInterest],
-        ['Salaries paid', pl.salaries],
+        ['Total salary paid (including advances and user expenses)', pl.salaries],
         ['Capital introduced', pl.capitalIn],
         ['Net (interest + accrued penalty - expenses - borrowed interest - salaries)', plNet],
       ]);
@@ -233,7 +233,7 @@ export default function ReportsPage() {
             <Stat label="Loans Disbursed" value={money(pl.disbursed)} />
             <Stat label="Business Expenses" value={money(pl.expenses)} tone="text-danger" />
             <Stat label="Borrowed Loan Interest" value={money(pl.borrowedInterest)} tone="text-danger" />
-            <Stat label="Salaries Paid" value={money(pl.salaries)} tone="text-danger" />
+            <Stat label="Total Salary Paid" value={money(pl.salaries)} tone="text-danger" />
             <Stat label="Net (Income − Outgo)" value={money(plNet)} tone={plNet >= 0 ? 'text-success' : 'text-danger'} />
           </div>
           <Card>
@@ -241,6 +241,7 @@ export default function ReportsPage() {
             <CardContent className="text-sm text-muted-foreground">
               Net = interest booked on loans disbursed in the period + penalty accrued − business expenses − borrowed-loan interest − salaries.
               User expenses are staff advances: they reduce cash and the member&apos;s payable salary, but are excluded from Profit &amp; Loss.
+              Total salary paid includes the final payout plus advances and user expenses allocated to that salary.
               Collections and disbursements move cash but are principal flows, not profit.
             </CardContent>
           </Card>

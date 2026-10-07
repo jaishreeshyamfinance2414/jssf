@@ -17,6 +17,17 @@ function salaryCycle(year: number, month: number, paymentDay: number) {
   return { lastSalaryDate: formatScheduledDate(previousMonth), upcomingSalaryDate: formatScheduledDate(scheduledMonth) };
 }
 
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+function ordinal(value: number) {
+  const remainder100 = value % 100;
+  if (remainder100 >= 11 && remainder100 <= 13) return `${value}th`;
+  if (value % 10 === 1) return `${value}st`;
+  if (value % 10 === 2) return `${value}nd`;
+  if (value % 10 === 3) return `${value}rd`;
+  return `${value}th`;
+}
+
 export const salaryService = {
   async upsertMember(input: { userId: string; monthlySalary: number; salaryDate: string }, actorId: string, ip?: string | null) {
     const member = await salaryRepository.upsertMember({ ...input, createdBy: actorId });
@@ -70,13 +81,14 @@ export const salaryService = {
       await salaryRepository.advanceSalaryDate(input.userId, nextSalaryDate, client);
       if (finalSalary > 0) {
         const account = await accountsRepository.getByType(input.mode === 'cash' ? 'cash' : 'bank', client);
+        const salaryNumber = member.salary_count + 1;
         await ledgerService.post(client, {
           accountId: account.id,
           direction: 'debit',
           amount: finalSalary,
           source: 'salary',
           referenceId: salary.id,
-          description: `Salary ${input.periodMonth}/${input.periodYear}`,
+          description: `${ordinal(salaryNumber)} Salary paid to ${member.full_name} for ${MONTHS[input.periodMonth - 1]} Month`,
           createdBy: actorId,
           txnDate: input.paidDate,
         });
