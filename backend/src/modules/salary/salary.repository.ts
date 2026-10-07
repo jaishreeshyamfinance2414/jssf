@@ -78,17 +78,18 @@ export const salaryRepository = {
     return rows;
   },
 
-  async userExpenses() {
+  async userExpenses(month: string) {
     const { rows } = await query(
-      `SELECT u.id AS user_id, u.full_name AS staff_name, r.name AS role_name,
-              date_trunc('month', e.expense_date)::date AS expense_month,
-              count(*)::int AS expense_count, sum(e.amount)::text AS total_expense
+      `SELECT e.id, u.id AS user_id, u.full_name AS staff_name, r.name AS role_name,
+              e.expense_date::text, e.description, e.amount::text
          FROM expenses e
          JOIN users u ON u.id = e.user_id
          JOIN roles r ON r.id = u.role_id
-        GROUP BY u.id, u.full_name, r.name, date_trunc('month', e.expense_date)
-        ORDER BY expense_month DESC, u.full_name
-        LIMIT 300`,
+        WHERE e.expense_date >= ($1 || '-01')::date
+          AND e.expense_date < (($1 || '-01')::date + interval '1 month')
+        ORDER BY e.expense_date DESC, e.created_at DESC, u.full_name
+        LIMIT 500`,
+      [month],
     );
     return rows;
   },

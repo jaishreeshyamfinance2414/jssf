@@ -12,8 +12,8 @@ export const salaryController = {
     return ok(res, await salaryRepository.members());
   },
 
-  async userExpenses(_req: Request, res: Response) {
-    return ok(res, await salaryRepository.userExpenses());
+  async userExpenses(req: Request, res: Response) {
+    return ok(res, await salaryRepository.userExpenses(String(req.query.month)));
   },
 
   async payable(req: Request, res: Response) {

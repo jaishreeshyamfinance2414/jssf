@@ -78,6 +78,7 @@ export const salaryService = {
           referenceId: salary.id,
           description: `Salary ${input.periodMonth}/${input.periodYear}`,
           createdBy: actorId,
+          txnDate: input.paidDate,
         });
       }
       await audit(

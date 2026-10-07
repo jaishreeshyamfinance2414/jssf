@@ -34,14 +34,13 @@ interface Payable {
   lastSalaryDate: string; upcomingSalaryDate: string;
 }
 interface PersonalExpense {
-  user_id: string; staff_name: string; role_name: string; expense_month: string;
-  expense_count: number; total_expense: string;
+  id: string; user_id: string; staff_name: string; role_name: string;
+  expense_date: string; description: string | null; amount: string;
 }
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const now = new Date();
 const upcoming = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-const monthLabel = (value: string) => new Date(value).toLocaleDateString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 const emptyPay = () => ({
   userId: '', periodYear: String(upcoming.getFullYear()), periodMonth: String(upcoming.getMonth() + 1),
   cashShortDeduct: '', advanceDeduct: '', mode: 'cash', paidDate: now.toISOString().slice(0, 10), note: '',
@@ -55,11 +54,16 @@ export default function SalaryPage() {
   const [showPay, setShowPay] = useState(false);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('latest');
+  const [expenseMonth, setExpenseMonth] = useState('');
   const [memberForm, setMemberForm] = useState({ userId: '', monthlySalary: '', salaryDate: upcoming.toISOString().slice(0, 10) });
   const [payForm, setPayForm] = useState(emptyPay);
   const { data: members = [] } = useQuery({ queryKey: ['salary-members'], queryFn: () => apiGet<Member[]>('/salaries/members') });
   const { data: salaries = [] } = useQuery({ queryKey: ['salaries'], queryFn: () => apiGet<Salary[]>('/salaries') });
-  const { data: personalExpenses = [] } = useQuery({ queryKey: ['salary-user-expenses'], queryFn: () => apiGet<PersonalExpense[]>('/salaries/user-expenses') });
+  const { data: personalExpenses = [], isFetching: personalExpensesLoading } = useQuery({
+    queryKey: ['salary-user-expenses', expenseMonth],
+    queryFn: () => apiGet<PersonalExpense[]>(`/salaries/user-expenses?month=${expenseMonth}`),
+    enabled: Boolean(expenseMonth),
+  });
 
   const payableParams = new URLSearchParams({
     userId: payForm.userId, periodYear: payForm.periodYear, periodMonth: payForm.periodMonth,
@@ -220,18 +224,28 @@ export default function SalaryPage() {
 
       <Card>
         <CardHeader className="border-b bg-amber-50 dark:bg-amber-950/20"><CardTitle className="text-lg text-amber-900 dark:text-amber-100">Monthly Personal Expenses</CardTitle><p className="text-sm text-amber-800/80 dark:text-amber-200/70">Money already taken by each member, including the admin/owner.</p></CardHeader>
-        <CardContent>
-          <DataTable
-            columns={['Member', 'Role', 'Month', 'Transactions', 'Personal Expense']}
-            rows={personalExpenses.map((expense) => [
-              expense.staff_name,
-              <StatusPill key={`${expense.user_id}-${expense.expense_month}-role`} value={expense.role_name} />,
-              monthLabel(expense.expense_month),
-              String(expense.expense_count),
-              <span key={`${expense.user_id}-${expense.expense_month}-amount`} className="inline-flex rounded-full bg-red-100 px-3 py-1 font-bold text-red-700 dark:bg-red-950/50 dark:text-red-300">{money(expense.total_expense)}</span>,
-            ])}
-            empty="No personal expenses recorded"
-          />
+        <CardContent className="space-y-4 pt-6">
+          <div className="max-w-xs">
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Select expense month</label>
+            <Input type="month" value={expenseMonth} onChange={(event) => setExpenseMonth(event.target.value)} />
+          </div>
+          {!expenseMonth ? (
+            <div className="rounded-xl border bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">Select a month to view staff personal expenses.</div>
+          ) : personalExpensesLoading ? (
+            <div className="rounded-xl border bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">Loading personal expenses...</div>
+          ) : (
+            <DataTable
+              columns={['Member', 'Role', 'Expense Date', 'Description', 'Personal Expense']}
+              rows={personalExpenses.map((expense) => [
+                expense.staff_name,
+                <StatusPill key={`${expense.id}-role`} value={expense.role_name} />,
+                date(expense.expense_date),
+                expense.description ?? '-',
+                <span key={`${expense.id}-amount`} className="inline-flex rounded-full bg-red-100 px-3 py-1 font-bold text-red-700 dark:bg-red-950/50 dark:text-red-300">{money(expense.amount)}</span>,
+              ])}
+              empty="No personal expenses recorded for the selected month"
+            />
+          )}
         </CardContent>
       </Card>
 

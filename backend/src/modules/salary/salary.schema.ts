@@ -7,8 +7,12 @@ export const createSalarySchema = z.object({
   cashShortDeduct: z.coerce.number().min(0).default(0),
   advanceDeduct: z.coerce.number().min(0).default(0),
   mode: z.enum(['cash', 'bank_transfer']).default('cash'),
-  paidDate: z.string().min(1).default(() => new Date().toISOString().slice(0, 10)),
+  paidDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Select the salary payment date'),
   note: z.string().optional().nullable(),
+});
+
+export const userExpensesQuerySchema = z.object({
+  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Select an expense month'),
 });
 
 export const memberSalarySchema = z.object({
